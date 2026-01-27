@@ -1,0 +1,38 @@
+# Prometheus Configuration for Executive Mind Matrix
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'executive-mind-matrix'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - 'alertmanager:9093'  # Uncomment if using Alertmanager
+
+# Load alerting rules
+rule_files:
+  - 'alerts.yaml'
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Executive Mind Matrix application
+  - job_name: 'executive-mind-matrix'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['app:8000']
+    metrics_path: '/metrics'
+    scheme: 'http'
+
+  # Node exporter (optional, for system metrics)
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
