@@ -81,3 +81,35 @@ class DialecticOutput(BaseModel):
     synthesis: str
     recommended_path: str
     conflict_points: List[str]
+
+
+class TaskSpawnResult(BaseModel):
+    """Result of spawning tasks from an intent"""
+    task_ids: List[str]
+    project_id: Optional[str] = None
+    area_id: str
+    tasks_created: int
+    project_created: bool
+
+
+class ProjectDetails(BaseModel):
+    """Details for creating a project"""
+    name: str
+    description: str
+    task_ids: List[str]
+    source_intent_id: str
+    area_id: Optional[str] = None
+
+
+class ConceptMatch(BaseModel):
+    """A concept extracted for knowledge linking"""
+    concept: str
+    node_type: str  # "Entity_Person", "Entity_Company", "Knowledge_Asset", "System_Component"
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class AreaAssignment(BaseModel):
+    """Area classification result"""
+    area_name: str
+    area_id: Optional[str] = None
+    confidence: float = Field(ge=0.0, le=1.0)
