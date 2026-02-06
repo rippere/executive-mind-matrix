@@ -267,7 +267,7 @@ AI Rationale:
                             "text": {
                                 "content": f"""RECOMMENDED OPTION: {analysis.recommended_option}
 
-{analysis.core_argument}"""
+{analysis.recommendation_rationale}"""
                             }
                         }]
                     }
