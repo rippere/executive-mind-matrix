@@ -7,6 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from config.settings import settings
 from app.models import NotionIntent, IntentStatus
+from app.command_center import CommandCenterSync
 
 
 class NotionPoller:
@@ -16,6 +17,7 @@ class NotionPoller:
         self.client = AsyncClient(auth=settings.notion_api_key)
         self.polling_interval = settings.polling_interval_seconds
         self.is_running = False
+        self.command_center = CommandCenterSync(self.client)
 
     async def start(self):
         """Start the polling loop"""
@@ -105,15 +107,15 @@ class NotionPoller:
 
             # Create appropriate database entry based on classification
             if classification["type"] == "strategic":
-                # Create Executive Intent
-                await self.create_executive_intent(
-                    title=classification["title"],
-                    description=content,
-                    agent=classification["agent"],
-                    risk=classification["risk"],
-                    impact=classification["impact"],
-                    source_inbox_id=intent_id
+                # Use workflow integration for complete, cohesive processing
+                from app.workflow_integration import WorkflowIntegration
+                workflow = WorkflowIntegration(self.client)
+
+                created_intent_id = await workflow.process_intent_complete_workflow(
+                    inbox_id=intent_id,
+                    classification=classification
                 )
+
                 await self.update_status(intent_id, "Triaged_to_Intent")
 
             elif classification["type"] == "operational":

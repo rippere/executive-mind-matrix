@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     notion_db_agent_registry: str
     notion_db_execution_log: str
     notion_db_training_data: str
+    notion_db_tasks: str
+    notion_db_projects: str
+    notion_db_areas: str
+    notion_db_nodes: str
 
     # Anthropic Configuration
     anthropic_api_key: str

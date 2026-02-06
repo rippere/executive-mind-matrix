@@ -384,3 +384,103 @@ class TestAPICORS:
             response = test_client.get("/")
             # Check for CORS headers when implemented
             assert response.status_code == 200
+
+
+@pytest.mark.api
+class TestActionPipePropertyPopulation:
+    """Test that Action Pipes are created with all required properties."""
+
+    @pytest.mark.asyncio
+    async def test_dialectic_populates_all_properties(
+        self,
+        sample_agent_analysis_json,
+        sample_synthesis_json
+    ):
+        """Test that dialectic endpoint populates Agent, Required_Resources, Task_Generation_Template, and AI_Raw_Output."""
+        with patch('app.agent_router.AsyncAnthropic') as mock_anthropic_class:
+            with patch('notion_client.AsyncClient') as mock_notion_class:
+                mock_anthropic = AsyncMock()
+                mock_anthropic_class.return_value = mock_anthropic
+
+                responses = [
+                    MagicMock(content=[MagicMock(text=sample_agent_analysis_json)]),
+                    MagicMock(content=[MagicMock(text=sample_agent_analysis_json)]),
+                    MagicMock(content=[MagicMock(text=sample_synthesis_json)])
+                ]
+                mock_anthropic.messages.create.side_effect = responses
+
+                mock_notion = AsyncMock()
+                mock_notion_class.return_value = mock_notion
+
+                # Mock intent with Agent_Persona relation
+                mock_notion.pages.retrieve.return_value = {
+                    "id": "intent123",
+                    "properties": {
+                        "Name": {"title": [{"text": {"content": "Test Intent"}}]},
+                        "Description": {"rich_text": [{"text": {"content": "Test description"}}]},
+                        "Agent_Persona": {"relation": [{"id": "agent456"}]}
+                    }
+                }
+
+                # Mock Action Pipe creation
+                mock_notion.pages.create.return_value = {"id": "action789"}
+                mock_notion.pages.update.return_value = {"id": "intent123"}
+                mock_notion.databases.query.return_value = {"results": [{"id": "pipe_123"}]}
+
+                async with AsyncClient(app=app, base_url="http://test") as ac:
+                    response = await ac.post("/dialectic/intent123")
+
+                assert response.status_code == 200
+
+                # Verify Action Pipe was created with all properties
+                create_calls = [call for call in mock_notion.pages.create.call_args_list
+                               if "Action_Title" in str(call)]
+
+                assert len(create_calls) > 0, "Action Pipe should have been created"
+
+                # Get the Action Pipe creation call
+                action_create_call = create_calls[0]
+                properties = action_create_call.kwargs["properties"]
+
+                # Verify all critical properties are populated
+                assert "Agent" in properties, "Agent relation should be populated"
+                assert properties["Agent"]["relation"] == [{"id": "agent456"}], "Agent should link to agent456"
+
+                assert "Required_Resources" in properties, "Required_Resources should be populated"
+                assert len(properties["Required_Resources"]["rich_text"]) > 0, "Required_Resources should have content"
+
+                assert "Task_Generation_Template" in properties, "Task_Generation_Template should be populated"
+                assert len(properties["Task_Generation_Template"]["rich_text"]) > 0, "Task_Generation_Template should have content"
+
+                assert "AI_Raw_Output" in properties, "AI_Raw_Output should be populated"
+                assert len(properties["AI_Raw_Output"]["rich_text"]) > 0, "AI_Raw_Output should have content"
+
+
+@pytest.mark.api
+class TestApprovalEndpoint:
+    """Test action approval endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_approve_action_endpoint(self):
+        """Test that POST /action/{action_id}/approve works correctly."""
+        with patch('notion_client.AsyncClient') as mock_notion_class:
+            mock_notion = AsyncMock()
+            mock_notion_class.return_value = mock_notion
+
+            # Mock successful update and log creation
+            mock_notion.pages.update.return_value = {"id": "action123"}
+            mock_notion.pages.create.return_value = {"id": "log123"}
+
+            async with AsyncClient(app=app, base_url="http://test") as ac:
+                response = await ac.post("/action/action123/approve")
+
+            assert response.status_code == 200
+            data = response.json()
+
+            assert data["status"] == "success"
+            assert data["action_id"] == "action123"
+            assert "message" in data
+
+            # Verify approval was called
+            update_call = mock_notion.pages.update.call_args
+            assert update_call is not None

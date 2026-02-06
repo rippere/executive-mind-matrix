@@ -101,24 +101,45 @@ Provide 3 options with clear pass/fail governance assessment."""
         Also assigns appropriate agent and risk level.
         """
 
-        prompt = f"""Triage this input from my system inbox:
+        prompt = f"""Triage this input from my system inbox and classify it accurately.
 
+INPUT:
 {content}
 
-Classify as:
-- 'strategic' (requires decision analysis, multiple options, or high impact > $1000)
-- 'operational' (clear next action, can execute immediately)
-- 'reference' (knowledge to store for later)
+CLASSIFICATION RULES:
 
-Respond ONLY with valid JSON (no markdown):
+**STRATEGIC** - Requires deep analysis and decision-making:
+- Involves choosing between multiple options/paths
+- Financial decisions > $1,000 (investments, hiring, contracts)
+- Career/business decisions (should I?, which option?)
+- Questions starting with "Should I...", "Which...", "How should..."
+- Long-term planning or significant commitments
+- Examples: "Should I hire X or Y?", "Which investment?", "Launch product or wait?"
+
+**OPERATIONAL** - Clear, immediate actions with no decision needed:
+- Simple tasks with obvious next steps
+- Data entry, sending emails, scheduling meetings
+- Questions starting with "Can you...", "Please...", "Remind me..."
+- Examples: "Email John about meeting", "Add task to calendar", "Look up..."
+
+**REFERENCE** - Information to store:
+- Articles, notes, ideas for later
+- No action required now
+- Examples: "Interesting article about...", "Note: remember this..."
+
+AGENT ASSIGNMENT:
+- The Entrepreneur → Growth, revenue, scaling, new opportunities
+- The Quant → Financial analysis, investments, data-driven decisions
+- The Auditor → Compliance, ethics, risk management, governance
+
+Respond with ONLY valid JSON (no markdown, no backticks):
 {{
-  "type": "strategic|operational|reference",
-  "title": "...",
-  "agent": "The Entrepreneur|The Quant|The Auditor",
-  "risk": "Low|Medium|High",
-  "impact": 1-10,
-  "next_action": "..." (if operational),
-  "rationale": "Why this classification"
+  "type": "strategic",
+  "title": "Brief decision title",
+  "agent": "The Entrepreneur",
+  "risk": "Medium",
+  "impact": 8,
+  "rationale": "Hiring is a strategic decision requiring analysis of multiple options"
 }}"""
 
         try:
@@ -171,6 +192,8 @@ Projected Impact: {projected_impact}/10
 
 TASK: Analyze this intent and provide 3 strategic options. You MUST respond with ONLY valid JSON, no other text.
 
+IMPORTANT: For the task_generation_template field, provide SPECIFIC, ACTIONABLE tasks (not vague descriptions).
+
 REQUIRED JSON FORMAT (copy this structure exactly):
 {{
   "scenario_options": [
@@ -208,8 +231,14 @@ REQUIRED JSON FORMAT (copy this structure exactly):
     "tools": ["Tool 1", "Tool 2"],
     "people": ["Role needed"]
   }},
-  "task_generation_template": ["Task 1", "Task 2", "Task 3"]
+  "task_generation_template": [
+    "Specific actionable task 1 (e.g., 'Research React component libraries and select one')",
+    "Specific actionable task 2 (e.g., 'Set up development environment with selected framework')",
+    "Specific actionable task 3 (e.g., 'Build proof-of-concept component')"
+  ]
 }}
+
+CRITICAL: Make task_generation_template tasks CONCRETE and ACTIONABLE. They will be auto-created as tasks in the user's system.
 
 IMPORTANT: Respond with ONLY the JSON object above. No explanations, no markdown, just pure JSON."""
 

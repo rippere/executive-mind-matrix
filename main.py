@@ -147,34 +147,178 @@ async def analyze_intent(
 async def run_dialectic(intent_id: str):
     """
     Run adversarial dialectic flow for a specific intent.
-    Returns synthesis of Growth vs Risk perspectives.
+    Adds results directly to the Intent page with proper workflow integration.
     """
 
     try:
-        router = AgentRouter()
+        from app.workflow_integration import WorkflowIntegration
+        from notion_client import AsyncClient
 
-        # In production, fetch intent details from Notion
-        # For now, use placeholder
+        router = AgentRouter()
+        client = AsyncClient(auth=settings.notion_api_key)
+        workflow = WorkflowIntegration(client)
+
+        # Fetch intent details from Notion
+        intent_page = await client.pages.retrieve(page_id=intent_id)
+        properties = intent_page.get("properties", {})
+
+        # Extract title and description
+        title_prop = properties.get("Name", {}).get("title", [])
+        title = title_prop[0]["text"]["content"] if title_prop else "Untitled"
+
+        desc_prop = properties.get("Description", {}).get("rich_text", [])
+        description = desc_prop[0]["text"]["content"] if desc_prop else ""
+
+        # Extract Agent_Persona relation for linking to Action Pipe
+        agent_relation = properties.get("Agent_Persona", {}).get("relation", [])
+        agent_id = agent_relation[0]["id"] if agent_relation else None
+
+        # Run dialectic analysis
         result = await router.dialectic_flow(
             intent_id=intent_id,
-            intent_title="Sample Intent",
-            intent_description="This is a test intent for dialectic analysis",
-            success_criteria="Achieve desired outcome",
+            intent_title=title,
+            intent_description=description,
+            success_criteria="",
             projected_impact=7
         )
+
+        # Add formatted results using workflow integration
+        dialectic_result = {
+            "synthesis": result.synthesis,
+            "recommended_path": result.recommended_path,
+            "conflict_points": result.conflict_points,
+            "growth_recommendation": result.growth_perspective.recommended_option if result.growth_perspective else "N/A",
+            "risk_recommendation": result.risk_perspective.recommended_option if result.risk_perspective else "N/A"
+        }
+
+        await workflow.run_dialectic_and_link(intent_id, dialectic_result)
+
+        # Create Action Pipe using EXISTING properties (avoid redundancy)
+        consensus = dialectic_result['growth_recommendation'] == dialectic_result['risk_recommendation']
+
+        # Format comprehensive scenario analysis for existing Scenario_Options field
+        scenario_text = f"""DIALECTIC ANALYSIS
+
+Growth Perspective (Entrepreneur): Option {dialectic_result['growth_recommendation']}
+Risk Perspective (Auditor): Option {dialectic_result['risk_recommendation']}
+Consensus: {'YES' if consensus else 'NO - Conflict detected'}
+
+SYNTHESIS:
+{result.synthesis}
+
+RECOMMENDED PATH:
+{dialectic_result['recommended_path']}
+
+CONFLICT POINTS:
+{chr(10).join(f"- {point}" for point in dialectic_result['conflict_points'])}
+"""
+
+        # Use Risk_Assessment for qualitative analysis
+        risk_text = f"""Agent Agreement: {'Full consensus' if consensus else 'Split opinion'}
+
+Growth-oriented risks: {result.growth_perspective.risk_assessment if result.growth_perspective else 'N/A'}
+
+Governance-oriented risks: {result.risk_perspective.risk_assessment if result.risk_perspective else 'N/A'}
+"""
+
+        # Extract Required_Resources and Task_Generation_Template from growth perspective (primary analysis)
+        import json
+        required_resources = result.growth_perspective.required_resources if result.growth_perspective else {}
+        resources_text = json.dumps(required_resources, indent=2) if required_resources else "Not specified"
+
+        task_template = result.growth_perspective.task_generation_template if result.growth_perspective else []
+        task_template_text = "\n".join(f"- {task}" for task in task_template) if task_template else "No tasks specified"
+
+        # Preserve full AI output for debugging and training
+        ai_raw_output = {
+            "growth_analysis": result.growth_perspective.dict() if result.growth_perspective else None,
+            "risk_analysis": result.risk_perspective.dict() if result.risk_perspective else None,
+            "synthesis": result.synthesis,
+            "recommended_path": result.recommended_path,
+            "conflict_points": result.conflict_points
+        }
+        ai_raw_text = json.dumps(ai_raw_output, indent=2)[:2000]
+
+        action_response = await client.pages.create(
+            parent={"database_id": settings.notion_db_action_pipes},
+            properties={
+                "Action_Title": {
+                    "title": [{"text": {"content": f"Decision: {title}"}}]
+                },
+                "Intent": {
+                    "relation": [{"id": intent_id}]
+                },
+                "Agent": {
+                    "relation": [{"id": agent_id}] if agent_id else []
+                },
+                "Recommended_Option": {
+                    "select": {"name": f"Option {dialectic_result['growth_recommendation']}"}
+                },
+                "Scenario_Options": {
+                    "rich_text": [{"text": {"content": scenario_text[:2000]}}]
+                },
+                "Risk_Assessment": {
+                    "rich_text": [{"text": {"content": risk_text[:2000]}}]
+                },
+                "Required_Resources": {
+                    "rich_text": [{"text": {"content": resources_text[:2000]}}]
+                },
+                "Task_Generation_Template": {
+                    "rich_text": [{"text": {"content": task_template_text[:2000]}}]
+                },
+                "AI_Raw_Output": {
+                    "rich_text": [{"text": {"content": ai_raw_text}}]
+                },
+                "Approval_Status": {
+                    "select": {"name": "Pending"}
+                },
+                "Consensus": {
+                    "checkbox": consensus
+                }
+            }
+        )
+        action_id = action_response["id"]
 
         return {
             "status": "success",
             "intent_id": intent_id,
-            "synthesis": result.synthesis,
-            "recommended_path": result.recommended_path,
-            "conflict_points": result.conflict_points,
-            "growth_recommendation": result.growth_perspective.recommended_option,
-            "risk_recommendation": result.risk_perspective.recommended_option
+            "action_id": action_id,
+            "message": "Dialectic analysis complete and Action Pipe created",
+            **dialectic_result
         }
 
     except Exception as e:
         logger.error(f"Error running dialectic: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/action/{action_id}/approve")
+async def approve_action(action_id: str):
+    """
+    Approve an Action Pipe and set the approval timestamp.
+
+    This endpoint updates the Approval_Status to "Approved" and sets
+    the Approved_Date to today's date. It also logs the approval to
+    the Execution Log for audit trail purposes.
+    """
+
+    try:
+        from app.workflow_integration import WorkflowIntegration
+        from notion_client import AsyncClient
+
+        client = AsyncClient(auth=settings.notion_api_key)
+        workflow = WorkflowIntegration(client)
+
+        await workflow.approve_action(action_id)
+
+        return {
+            "status": "success",
+            "action_id": action_id,
+            "message": "Action approved successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error approving action: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -229,6 +373,160 @@ async def log_settlement(
 
     except Exception as e:
         logger.error(f"Error logging settlement: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/command-center/setup")
+async def setup_command_center():
+    """
+    ONE-TIME SETUP: Creates the Command Center structure with placeholders
+    for linked database views. After running this once, you manually add
+    the database views and never need to rebuild again.
+    """
+
+    try:
+        from app.command_center_final import FinalCommandCenter
+        from notion_client import AsyncClient
+
+        client = AsyncClient(auth=settings.notion_api_key)
+        command_center = FinalCommandCenter(client)
+
+        message = await command_center.initial_setup()
+
+        return {
+            "status": "success",
+            "message": message,
+            "url": f"https://notion.so/{command_center.command_center_id.replace('-', '')}",
+            "next_steps": "Open the Command Center and add linked database views as instructed"
+        }
+
+    except Exception as e:
+        logger.error(f"Error setting up Command Center: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/intent/{intent_id}/create-action")
+async def create_action_from_intent(
+    intent_id: str,
+    action_title: str = "Action from Intent",
+    action_description: str = "Implement the decisions from this strategic intent"
+):
+    """
+    Create an Action Pipe from an Executive Intent.
+    This completes the workflow: Intent → Analysis → Decision → Action
+    """
+
+    try:
+        from app.workflow_integration import WorkflowIntegration
+        from notion_client import AsyncClient
+
+        client = AsyncClient(auth=settings.notion_api_key)
+        workflow = WorkflowIntegration(client)
+
+        action_id = await workflow.create_action_from_intent(
+            intent_id=intent_id,
+            action_title=action_title,
+            action_description=action_description
+        )
+
+        return {
+            "status": "success",
+            "intent_id": intent_id,
+            "action_id": action_id,
+            "message": "Action Pipe created and linked to Intent",
+            "url": f"https://notion.so/{action_id.replace('-', '')}"
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating action from intent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/command-center/update-metrics")
+async def update_command_center_metrics():
+    """
+    Lightweight update - only refreshes the metrics callout.
+    All database views update automatically in real-time, so this
+    is the only thing you need to refresh periodically.
+    """
+
+    try:
+        from app.command_center_final import FinalCommandCenter
+        from notion_client import AsyncClient
+
+        client = AsyncClient(auth=settings.notion_api_key)
+        command_center = FinalCommandCenter(client)
+
+        metrics = await command_center.update_metrics_only()
+
+        return {
+            "status": "success",
+            "message": "Metrics updated",
+            "metrics": metrics
+        }
+
+    except Exception as e:
+        logger.error(f"Error updating Command Center metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/action/{action_id}/spawn-tasks")
+async def spawn_tasks_from_action(action_id: str):
+    """
+    Spawn tasks from an approved Action Pipe.
+    This completes the workflow: Intent → Analysis → Approval → Task Generation
+    """
+
+    try:
+        from app.task_spawner import TaskSpawner
+        from notion_client import AsyncClient
+
+        client = AsyncClient(auth=settings.notion_api_key)
+
+        # Fetch action details
+        action_page = await client.pages.retrieve(page_id=action_id)
+        properties = action_page.get("properties", {})
+
+        # Get task template from action
+        task_template_prop = properties.get("Task_Generation_Template", {}).get("rich_text", [])
+        task_template_text = task_template_prop[0]["text"]["content"] if task_template_prop else ""
+
+        # Parse task template (assuming newline-separated tasks)
+        task_list = [task.strip() for task in task_template_text.split("\n") if task.strip()]
+
+        # Get related intent
+        intent_relation = properties.get("Intent", {}).get("relation", [])
+        intent_id = intent_relation[0]["id"] if intent_relation else None
+
+        if not intent_id:
+            raise HTTPException(status_code=400, detail="Action has no linked Intent")
+
+        if not task_list:
+            raise HTTPException(status_code=400, detail="Action has no task template")
+
+        # Spawn tasks
+        spawner = TaskSpawner()
+        result = await spawner.spawn_tasks_from_intent(
+            intent_id=intent_id,
+            task_template=task_list,
+            area_id=None  # Could extract from intent if needed
+        )
+
+        return {
+            "status": "success",
+            "action_id": action_id,
+            "intent_id": intent_id,
+            "tasks_created": result.tasks_created,
+            "project_created": result.project_created,
+            "project_id": result.project_id,
+            "task_ids": result.task_ids,
+            "message": f"Created {result.tasks_created} tasks" + (f" and 1 project" if result.project_created else "")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error spawning tasks from action: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
