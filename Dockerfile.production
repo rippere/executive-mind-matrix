@@ -56,9 +56,8 @@ EXPOSE 8000
 # Set environment variables for production
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    ENVIRONMENT=production \
-    PORT=8000
+    ENVIRONMENT=production
 
 # Run the application with production settings
-# Railway will override the startCommand via railway.json which uses $PORT
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log"]
+# Railway provides PORT as an environment variable
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log
