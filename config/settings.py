@@ -46,7 +46,21 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         case_sensitive = False
+        # Allow environment variables to override .env file
+        # This is crucial for Railway deployment
+        env_prefix = ""
 
 
-settings = Settings()
+# Initialize settings with better error handling
+try:
+    settings = Settings()
+except Exception as e:
+    import sys
+    print(f"FATAL: Failed to load settings: {e}", file=sys.stderr)
+    print("Required environment variables:", file=sys.stderr)
+    print("- NOTION_API_KEY", file=sys.stderr)
+    print("- ANTHROPIC_API_KEY", file=sys.stderr)
+    print("- NOTION_DB_* (11 database IDs)", file=sys.stderr)
+    raise
