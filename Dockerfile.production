@@ -46,17 +46,19 @@ RUN mkdir -p logs && chown -R appuser:appuser logs
 # Switch to non-root user
 USER appuser
 
-# Expose port
+# Expose port (Railway will use dynamic PORT env var)
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check (disabled for Railway - Railway has its own healthcheck via railway.json)
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+#     CMD curl -f http://localhost:8000/health || exit 1
 
 # Set environment variables for production
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    ENVIRONMENT=production
+    ENVIRONMENT=production \
+    PORT=8000
 
 # Run the application with production settings
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "info", "--proxy-headers", "--forwarded-allow-ips", "*", "--access-log"]
+# Railway will override the startCommand via railway.json which uses $PORT
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log"]
