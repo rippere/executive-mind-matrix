@@ -65,10 +65,16 @@ class NotionPoller:
             response = await self.client.databases.query(
                 database_id=settings.notion_db_system_inbox,
                 filter={
-                    "property": "Status",
-                    "select": {
-                        "equals": "Unprocessed"
-                    }
+                    "or": [
+                        {
+                            "property": "Status",
+                            "select": {"equals": "Unprocessed"}
+                        },
+                        {
+                            "property": "Status",
+                            "select": {"is_empty": True}
+                        }
+                    ]
                 },
                 sorts=[
                     {
@@ -119,14 +125,125 @@ class NotionPoller:
                 await self.update_status(intent_id, "Triaged_to_Intent")
 
             elif classification["type"] == "operational":
-                # Create Task directly
-                # TODO: Implement task creation
-                await self.update_status(intent_id, "Triaged_to_Task")
+                # Create Task directly - operational intents bypass strategic workflow
+                try:
+                    logger.info(f"Creating operational task for intent {intent_id[:8]}")
+
+                    # Extract task title from classification or use content summary
+                    task_title = classification.get("title", content[:100])
+
+                    # Create task in DB_Tasks
+                    task_response = await self.client.pages.create(
+                        parent={"database_id": settings.notion_db_tasks},
+                        properties={
+                            "Name": {
+                                "title": [{"text": {"content": task_title}}]
+                            },
+                            "Status": {
+                                "status": {"name": "Not started"}
+                            },
+                            "Source Intent": {
+                                "relation": [{"id": intent_id}]
+                            },
+                            "Auto Generated": {
+                                "checkbox": True
+                            }
+                        }
+                    )
+
+                    task_id = task_response["id"]
+                    logger.success(f"Created operational task {task_id[:8]}: '{task_title[:50]}...'")
+
+                    # Add context to the task page
+                    await self._add_operational_task_context(
+                        task_id=task_id,
+                        inbox_id=intent_id,
+                        classification=classification,
+                        original_content=content
+                    )
+
+                    # Log to Execution Log for audit trail
+                    await self._log_task_creation(
+                        task_id=task_id,
+                        inbox_id=intent_id,
+                        task_title=task_title
+                    )
+
+                    # Update System Inbox status
+                    await self.update_status(intent_id, "Triaged_to_Task")
+                    logger.info(f"Operational intent {intent_id[:8]} triaged to task successfully")
+
+                except Exception as e:
+                    logger.error(f"Error creating operational task for {intent_id[:8]}: {e}")
+                    # Don't update status if task creation failed
+                    raise
 
             else:  # reference
-                # Create Knowledge Node
-                # TODO: Implement node creation
-                await self.update_status(intent_id, "Triaged_to_Node")
+                # Create Knowledge Node for reference content
+                try:
+                    logger.info(f"Creating knowledge node for reference content: {intent_id[:8]}")
+
+                    # Extract concepts from content using AI
+                    from app.knowledge_linker import KnowledgeLinker
+                    knowledge_linker = KnowledgeLinker()
+
+                    concepts = await knowledge_linker.extract_concepts(content, max_concepts=3)
+
+                    node_ids = []
+                    if concepts:
+                        logger.info(f"Extracted {len(concepts)} concepts: {[c.concept for c in concepts]}")
+
+                        # Create or find nodes for each concept
+                        for concept in concepts:
+                            node_id = await knowledge_linker.find_or_create_node(concept)
+                            if node_id:
+                                node_ids.append(node_id)
+
+                        # Link the System Inbox to the created nodes
+                        if node_ids:
+                            await self.client.pages.update(
+                                page_id=intent_id,
+                                properties={
+                                    "Related_Nodes": {
+                                        "relation": [{"id": node_id} for node_id in node_ids]
+                                    }
+                                }
+                            )
+                            logger.success(f"Created/linked {len(node_ids)} knowledge nodes")
+
+                        # Auto-tag with categories based on node types
+                        categories = list(set([c.node_type for c in concepts]))
+                        category_str = ", ".join(categories)
+
+                        # Update System Inbox with auto-generated tags
+                        await self.client.pages.update(
+                            page_id=intent_id,
+                            properties={
+                                "Auto_Tags": {
+                                    "rich_text": [{"text": {"content": category_str[:2000]}}]
+                                }
+                            }
+                        )
+                        logger.info(f"Auto-tagged with categories: {category_str}")
+
+                    else:
+                        logger.warning("No concepts extracted from reference content")
+
+                    # Log to Execution Log for audit trail
+                    await self._log_knowledge_node_creation(
+                        inbox_id=intent_id,
+                        node_count=len(node_ids),
+                        concepts=[c.concept for c in concepts] if concepts else []
+                    )
+
+                    # Update System Inbox status
+                    await self.update_status(intent_id, "Triaged_to_Node")
+                    logger.info(f"Reference intent {intent_id[:8]} triaged to knowledge nodes successfully")
+
+                except Exception as node_error:
+                    logger.error(f"Error creating knowledge node for {intent_id[:8]}: {node_error}")
+                    # Still update status to mark as processed, even if node creation partially failed
+                    await self.update_status(intent_id, "Triaged_to_Node")
 
             logger.info(f"Intent {intent_id[:8]} processed successfully")
             return True
@@ -235,6 +352,212 @@ class NotionPoller:
         except Exception as e:
             logger.error(f"Error finding agent {agent_name}: {e}")
             return None
+
+    async def _add_operational_task_context(
+        self,
+        task_id: str,
+        inbox_id: str,
+        classification: Dict[str, Any],
+        original_content: str
+    ) -> None:
+        """Add context and metadata to operational task page"""
+        try:
+            logger.debug(f"Adding context to operational task {task_id[:8]}")
+
+            # Create source URL for System Inbox
+            inbox_url = f"https://notion.so/{inbox_id.replace('-', '')}"
+
+            blocks = [
+                {
+                    "type": "callout",
+                    "callout": {
+                        "icon": {"emoji": "🤖"},
+                        "color": "blue_background",
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {
+                                "content": f"""Auto-Generated Operational Task
+
+This task was automatically created from System Inbox.
+
+Source: {inbox_url}
+Classification: {classification.get('type', 'operational')}
+Priority: {classification.get('impact', 5)}/10"""
+                            }
+                        }]
+                    }
+                },
+                {
+                    "type": "divider",
+                    "divider": {}
+                },
+                {
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {"content": "📋 Original Request"}
+                        }]
+                    }
+                },
+                {
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {"content": original_content[:1900]}  # Notion limit
+                        }]
+                    }
+                }
+            ]
+
+            # Add rationale if available
+            if classification.get("rationale"):
+                blocks.extend([
+                    {
+                        "type": "divider",
+                        "divider": {}
+                    },
+                    {
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{
+                                "type": "text",
+                                "text": {"content": "🧠 AI Classification"}
+                            }]
+                        }
+                    },
+                    {
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{
+                                "type": "text",
+                                "text": {"content": classification["rationale"][:1900]}
+                            }]
+                        }
+                    }
+                ])
+
+            await self.client.blocks.children.append(
+                block_id=task_id,
+                children=blocks
+            )
+
+            logger.debug(f"Context added to task {task_id[:8]}")
+
+        except Exception as e:
+            logger.warning(f"Could not add context to task {task_id[:8]}: {e}")
+            # Don't raise - task creation still succeeded
+
+    async def _log_task_creation(
+        self,
+        task_id: str,
+        inbox_id: str,
+        task_title: str
+    ) -> None:
+        """Log operational task creation to Execution Log"""
+        try:
+            logger.debug(f"Logging task creation to Execution Log")
+
+            # Get next Log ID
+            log_id = await self._get_next_log_id()
+
+            # Create task URL for reference
+            task_url = f"https://notion.so/{task_id.replace('-', '')}"
+
+            await self.client.pages.create(
+                parent={"database_id": settings.notion_db_execution_log},
+                properties={
+                    "Log_Entry_Title": {
+                        "title": [{"text": {"content": "Operational Task Created"}}]
+                    },
+                    "Log_ID": {
+                        "number": log_id
+                    },
+                    "Action_Taken": {
+                        "rich_text": [{
+                            "text": {
+                                "content": f"Auto-created task from System Inbox: '{task_title[:100]}...'\n\nTask: {task_url}\nSource: Operational intent classification"
+                            }
+                        }]
+                    },
+                    "Decision_Date": {
+                        "date": {"start": datetime.now().date().isoformat()}
+                    }
+                }
+            )
+
+            logger.debug(f"Task creation logged with Log_ID {log_id}")
+
+        except Exception as e:
+            logger.warning(f"Could not log task creation: {e}")
+            # Don't raise - task creation still succeeded
+
+    async def _get_next_log_id(self) -> int:
+        """Get next sequential Log ID from Execution Log"""
+        try:
+            response = await self.client.databases.query(
+                database_id=settings.notion_db_execution_log,
+                page_size=100
+            )
+
+            max_id = 0
+            for page in response.get("results", []):
+                log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
+                if log_id and log_id > max_id:
+                    max_id = log_id
+
+            return max_id + 1
+        except Exception as e:
+            logger.warning(f"Error getting next log ID, defaulting to 1: {e}")
+            return 1
+
+    async def _log_knowledge_node_creation(
+        self,
+        inbox_id: str,
+        node_count: int,
+        concepts: List[str]
+    ) -> None:
+        """Log knowledge node creation to Execution Log"""
+        try:
+            logger.debug(f"Logging knowledge node creation to Execution Log")
+
+            # Get next Log ID
+            log_id = await self._get_next_log_id()
+
+            # Create inbox URL for reference
+            inbox_url = f"https://notion.so/{inbox_id.replace('-', '')}"
+
+            # Format concepts list
+            concepts_str = ", ".join(concepts) if concepts else "No concepts extracted"
+
+            await self.client.pages.create(
+                parent={"database_id": settings.notion_db_execution_log},
+                properties={
+                    "Log_Entry_Title": {
+                        "title": [{"text": {"content": "Knowledge Nodes Created"}}]
+                    },
+                    "Log_ID": {
+                        "number": log_id
+                    },
+                    "Action_Taken": {
+                        "rich_text": [{
+                            "text": {
+                                "content": f"Created {node_count} knowledge node(s) from reference content.\n\nConcepts: {concepts_str[:1800]}\n\nSource: {inbox_url}\nClassification: Reference intent"
+                            }
+                        }]
+                    },
+                    "Decision_Date": {
+                        "date": {"start": datetime.now().date().isoformat()}
+                    }
+                }
+            )
+
+            logger.debug(f"Knowledge node creation logged with Log_ID {log_id}")
+
+        except Exception as e:
+            logger.warning(f"Could not log knowledge node creation: {e}")
+            # Don't raise - node creation still succeeded
 
     @staticmethod
     def extract_text_property(prop: Dict[str, Any]) -> str:
