@@ -118,14 +118,17 @@ CLASSIFICATION RULES:
 
 **OPERATIONAL** - Clear, immediate actions with no decision needed:
 - Simple tasks with obvious next steps
-- Data entry, sending emails, scheduling meetings
+- Data entry, sending emails, scheduling meetings, coordination
+- Organizing events, logistics, reminders, follow-ups
 - Questions starting with "Can you...", "Please...", "Remind me..."
-- Examples: "Email John about meeting", "Add task to calendar", "Look up..."
+- Examples: "Email John about meeting", "Schedule team dinner", "Organize the hockey plans for the guys", "Get everyone together for an event"
 
-**REFERENCE** - Information to store:
-- Articles, notes, ideas for later
-- No action required now
-- Examples: "Interesting article about...", "Note: remember this..."
+**REFERENCE** - Information or knowledge to store, NO action required:
+- Articles, research, notes, concepts, frameworks to remember
+- Market data, industry insights, educational content
+- Anything the user wants to capture for future reference
+- Key signal: passive information, nothing needs to be DONE right now
+- Examples: "Interesting article about zero-based budgeting", "Note: the key principles of XYZ", "Concept: how compounding interest works", "Read this later: ...", "Key insight from today..."
 
 AGENT ASSIGNMENT:
 - The Entrepreneur → Growth, revenue, scaling, new opportunities

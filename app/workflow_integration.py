@@ -98,6 +98,19 @@ class WorkflowIntegration:
 
             intent_id = intent_response["id"]
 
+            # Write back to System Inbox: link intent + set triage destination
+            await self.client.pages.update(
+                page_id=inbox_id,
+                properties={
+                    "Routed_to_Intent": {
+                        "relation": [{"id": intent_id}]
+                    },
+                    "Triage_Destination": {
+                        "select": {"name": "Strategic (Intent)"}
+                    }
+                }
+            )
+
             # Add rich context blocks to the Intent page
             await self._add_intent_context(intent_id, classification, original_title)
 
@@ -290,7 +303,7 @@ AI Rationale:
                     "toggle": {
                         "rich_text": [{
                             "type": "text",
-                            "text": {"content": f"Option {chr(64+i)}: {option.title}"}
+                            "text": {"content": f"Option {option.option}: {option.description[:60]}"}
                         }],
                         "children": [
                             {
@@ -307,7 +320,7 @@ AI Rationale:
                                 "paragraph": {
                                     "rich_text": [{
                                         "type": "text",
-                                        "text": {"content": f"✅ Pros: {option.pros}"}
+                                        "text": {"content": f"✅ Pros: {', '.join(option.pros)}"}
                                     }]
                                 }
                             },
@@ -316,7 +329,7 @@ AI Rationale:
                                 "paragraph": {
                                     "rich_text": [{
                                         "type": "text",
-                                        "text": {"content": f"⚠️ Cons: {option.cons}"}
+                                        "text": {"content": f"⚠️ Cons: {', '.join(option.cons)}"}
                                     }]
                                 }
                             },
@@ -325,7 +338,7 @@ AI Rationale:
                                 "paragraph": {
                                     "rich_text": [{
                                         "type": "text",
-                                        "text": {"content": f"📈 Expected Outcome: {option.expected_outcome}"}
+                                        "text": {"content": f"Risk: {option.risk}/5 | Impact: {option.impact}/10"}
                                     }]
                                 }
                             }
