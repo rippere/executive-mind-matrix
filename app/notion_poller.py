@@ -140,7 +140,7 @@ class NotionPoller:
                                 "title": [{"text": {"content": task_title}}]
                             },
                             "Status": {
-                                "status": {"name": "Not started"}
+                                "select": {"name": "Not started"}
                             },
                             "Source Intent": {
                                 "relation": [{"id": intent_id}]
