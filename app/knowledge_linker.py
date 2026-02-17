@@ -113,11 +113,6 @@ Only include concepts that are important and worth tracking. Ignore common words
                                 }
                             }
                         ]
-                    },
-                    "Node_Type": {
-                        "select": {
-                            "name": concept.node_type
-                        }
                     }
                 }
             )

@@ -142,11 +142,8 @@ class NotionPoller:
                             "Status": {
                                 "select": {"name": "Not started"}
                             },
-                            "Source Intent": {
+                            "Related Intents": {
                                 "relation": [{"id": intent_id}]
-                            },
-                            "Auto Generated": {
-                                "checkbox": True
                             }
                         }
                     )
