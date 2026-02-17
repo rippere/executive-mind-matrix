@@ -377,11 +377,14 @@ async def log_settlement(
 
 
 @app.post("/command-center/setup")
-async def setup_command_center():
+async def setup_command_center(force: bool = False):
     """
     ONE-TIME SETUP: Creates the Command Center structure with placeholders
     for linked database views. After running this once, you manually add
     the database views and never need to rebuild again.
+
+    WARNING: This will DELETE all existing content on the Command Center page.
+    Pass ?force=true to confirm you want to overwrite an existing page.
     """
 
     try:
@@ -390,6 +393,14 @@ async def setup_command_center():
 
         client = AsyncClient(auth=settings.notion_api_key)
         command_center = FinalCommandCenter(client)
+
+        # Guard: check if page already has content
+        existing = await client.blocks.children.list(block_id=command_center.command_center_id)
+        if existing.get("results") and not force:
+            raise HTTPException(
+                status_code=409,
+                detail="Command Center page already has content. Pass ?force=true to overwrite. WARNING: this will permanently delete the existing layout."
+            )
 
         message = await command_center.initial_setup()
 
@@ -400,6 +411,8 @@ async def setup_command_center():
             "next_steps": "Open the Command Center and add linked database views as instructed"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error setting up Command Center: {e}")
         raise HTTPException(status_code=500, detail=str(e))
