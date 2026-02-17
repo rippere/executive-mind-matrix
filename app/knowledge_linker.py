@@ -139,7 +139,7 @@ Only include concepts that are important and worth tracking. Ignore common words
             await self.notion.pages.update(
                 page_id=intent_id,
                 properties={
-                    "Related_Nodes": {
+                    "Routed_to_Node": {
                         "relation": [{"id": node_id} for node_id in node_ids]
                     }
                 }

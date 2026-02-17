@@ -166,6 +166,19 @@ class NotionPoller:
                         task_title=task_title
                     )
 
+                    # Write back to System Inbox: link task + set triage destination
+                    await self.client.pages.update(
+                        page_id=intent_id,
+                        properties={
+                            "Routed_to_Task": {
+                                "relation": [{"id": task_id}]
+                            },
+                            "Triage_Destination": {
+                                "select": {"name": "Operational (Task)"}
+                            }
+                        }
+                    )
+
                     # Update System Inbox status
                     await self.update_status(intent_id, "Triaged_to_Task")
                     logger.info(f"Operational intent {intent_id[:8]} triaged to task successfully")
@@ -232,6 +245,29 @@ class NotionPoller:
                         node_count=len(node_ids),
                         concepts=[c.concept for c in concepts] if concepts else []
                     )
+
+                    # Write back to System Inbox: link nodes + set triage destination
+                    if node_ids:
+                        await self.client.pages.update(
+                            page_id=intent_id,
+                            properties={
+                                "Routed_to_Node": {
+                                    "relation": [{"id": nid} for nid in node_ids]
+                                },
+                                "Triage_Destination": {
+                                    "select": {"name": "Reference (Node)"}
+                                }
+                            }
+                        )
+                    else:
+                        await self.client.pages.update(
+                            page_id=intent_id,
+                            properties={
+                                "Triage_Destination": {
+                                    "select": {"name": "Reference (Node)"}
+                                }
+                            }
+                        )
 
                     # Update System Inbox status
                     await self.update_status(intent_id, "Triaged_to_Node")
