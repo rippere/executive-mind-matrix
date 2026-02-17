@@ -6,101 +6,145 @@ AI-powered decision intelligence system with adversarial agent dialectics.
 
 ## 🚦 CURRENT SETUP STATUS
 
-**Last Updated**: 2026-01-15 14:22
+**Last Updated**: 2026-02-17
 
 ### ✅ Completed Steps
 1. ✅ Environment file (.env) configured with all API keys and database IDs
 2. ✅ Virtual environment created and dependencies installed
-3. ✅ FastAPI application running successfully on http://0.0.0.0:8000
-4. ✅ Health check passing - all systems operational
-5. ✅ All 6 Notion databases connected to integration
-   - ✅ DB_System_Inbox (ID: 2dcc88542aed80d0a1cee56edfbbe2ee)
-   - ✅ DB_Executive_Intents (ID: 2dcc88542aed802880d9e98d8a7be73b)
-   - ✅ DB_Action_Pipes (ID: 2dcc88542aed807abce7cdcf95bdae73)
-   - ✅ DB_Agent_Registry (ID: 2dcc88542aed80f2acd3e5b1dd01dde7)
-   - ✅ DB_Execution_Log (ID: 2dcc88542aed8018ad49daf21cd2044c)
-   - ✅ DB_Training_Data (ID: 850be0fc91bf42878a38d8f6f81a55c3)
-6. ✅ System health verified - all databases configured correctly
-7. ✅ Poller running (2-minute cycle active)
+3. ✅ **Deployed to Railway** — live at `https://web-production-3d888.up.railway.app`
+4. ✅ Health check passing — all systems operational
+5. ✅ All 10 Notion databases connected and verified
+   - ✅ DB_System_Inbox
+   - ✅ DB_Executive_Intents
+   - ✅ DB_Action_Pipes
+   - ✅ DB_Agent_Registry
+   - ✅ DB_Execution_Log
+   - ✅ DB_Training_Data
+   - ✅ DB_Tasks
+   - ✅ DB_Projects
+   - ✅ DB_Areas
+   - ✅ DB_Nodes
+6. ✅ Poller running (2-minute cycle, picks up items with no status set)
+7. ✅ All three triage routes operational:
+   - ✅ Strategic → Executive Intents (with agent analysis)
+   - ✅ Operational → Tasks (with inbox writeback)
+   - ✅ Reference → Knowledge Nodes (with inbox writeback)
+8. ✅ System Inbox writeback working — `Triage_Destination`, `Routed_to_Intent`, `Routed_to_Task`, `Routed_to_Node` all populated after processing
 
-### 🔄 NEXT: End-to-End Testing
-**📍 YOU ARE HERE** → Ready to test the complete workflow
+### 📍 Current State: Production Live
 
-**When you have network access, do this**:
-
-**Step 1: Create Test Intent in Notion**
-1. Open your **System Inbox** database in Notion
-2. Create a new entry:
-   - **Title**: "Test Intent: Should I invest in index funds?"
-   - **Status**: "Unprocessed" (or your equivalent)
-   - **Description**: "I have $5k to invest. Should I go with VTI or individual stocks?"
-
-**Step 2: Trigger the System**
+The system is fully deployed and operational. To trigger a manual poll:
 ```bash
-# Option A: Wait 2 minutes for automatic polling
-tail -f logs/app.log
-
-# Option B: Trigger immediately
-curl -X POST http://localhost:8000/trigger-poll
+curl -X POST https://web-production-3d888.up.railway.app/trigger-poll
 ```
 
-**Step 3: Verify the Flow**
-- [ ] Intent picked up from System Inbox
-- [ ] Status changed: "Unprocessed" → "Processing" → "Triaged_to_Intent"
-- [ ] New entry created in **Executive Intents** database
-- [ ] (Optional) Run dialectic analysis: `curl -X POST http://localhost:8000/dialectic/{INTENT_ID}`
+To check system health:
+```bash
+curl https://web-production-3d888.up.railway.app/health
+```
 
-**Step 4: After Testing**
-- [ ] Review the AI-generated analysis in Executive Intents
-- [ ] Test the training data logger by editing an AI suggestion
-- [ ] (Optional) Deploy to Railway for 24/7 operation
-
-### ⏭️ Future Steps
-- [ ] Deploy to Railway (optional)
-- [ ] Set up monitoring and alerts
+### ⏭️ Next Steps
+- [ ] Upgrade Anthropic model from `claude-3-haiku` to Claude Sonnet for better analysis quality
+- [ ] Deploy `main_enhanced.py` (Sentry, Prometheus metrics, security middleware)
+- [ ] Set up Prometheus + Grafana monitoring
+- [ ] Collect training data settlements for fine-tuning pipeline
 - [ ] Configure production environment variables
 
 ---
 
-## Features
+## Phase 1 Features
 
 ### 1. **Async Notion Poller** (2-minute cycle)
 - Monitors `DB_System_Inbox` for pending intents
+- **Three-way classification and routing**:
+  - **Strategic** → Creates Executive Intents
+  - **Operational** → Creates Tasks in DB_Tasks
+  - **Reference** → Creates Knowledge Nodes in DB_Nodes
 - Non-blocking concurrent processing
-- Automatic classification and routing
+- Status tracking: Unprocessed → Processing → Triaged_to_Intent/Task/Node
 
-### 2. **Diff Logger** (Training Data Asset)
+### 2. **Operational Task Creation**
+- Automatically creates actionable tasks from operational intents
+- Rich context with callouts and formatting
+- Bidirectional linking to source System Inbox entry
+- Audit logging to Execution Log
+- Auto-marked as auto-generated for tracking
+
+### 3. **Knowledge Node Creation**
+- AI-powered concept extraction from reference content
+- Automatic node creation/finding in DB_Nodes
+- Auto-tagging with semantic categories
+- Bidirectional linking with System Inbox
+- Audit logging to Execution Log
+
+### 4. **Diff Logger** (Training Data Asset)
 - Captures delta between AI suggestions and human edits
 - Calculates acceptance rates for continuous learning
 - Dual storage: Notion + JSON logs
 
-### 3. **Adversarial Agent Router**
+### 5. **Property Validation Logging**
+- Logs all property additions to `logs/property_changes.jsonl`
+- Structured JSONL format with ISO timestamps
+- Prevents redundant property creation
+- Enables schema governance analysis
+
+### 6. **Adversarial Agent Router**
 - **The Entrepreneur**: Growth-focused, revenue-oriented
 - **The Quant**: Risk-adjusted, mathematical analysis
 - **The Auditor**: Compliance, ethics, governance
 - **Dialectic Flow**: Synthesizes competing perspectives
 
-### 4. **FastAPI REST API**
-- Health checks and metrics
-- Manual triggers for testing
+### 7. **FastAPI REST API**
+- Health checks and system status
+- Manual triggers for testing and override
 - Settlement logging endpoint
+- Agent performance metrics
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    FastAPI Application                   │
-│  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ Notion Poller │  │ Agent Router │  │ Diff Logger  │ │
-│  │  (2 min loop) │  │  (Dialectic) │  │  (Training)  │ │
-│  └───────┬───────┘  └──────┬───────┘  └──────┬───────┘ │
-└──────────┼──────────────────┼──────────────────┼─────────┘
-           │                  │                  │
-           ▼                  ▼                  ▼
-    ┌──────────────────────────────────────────────────┐
-    │              Notion Databases                     │
-    │  System Inbox │ Intents │ Actions │ Training     │
-    └──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                     FastAPI Application (2min cycle)               │
+│  ┌──────────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
+│  │ Notion Poller    │  │Agent Router  │  │DiffLogger/Validation │ │
+│  │(2 min poll)      │  │ (Dialectic)  │  │(Training/Audit)      │ │
+│  └────────┬─────────┘  └──────┬───────┘  └──────────┬───────────┘ │
+└───────────┼────────────────────┼──────────────────────┼─────────────┘
+            │                    │                      │
+     ┌──────┴───────────┐        │            ┌─────────┴──────┐
+     │                  │        │            │                │
+     ▼                  ▼        │            ▼                ▼
+┌─────────────┐  ┌────────────┐ │     ┌──────────────┐  ┌──────────┐
+│ClassifyIntent   │Route Task  │ │     │Task Creation │  │Property  │
+│(Strategic)  │  │(Operational)     │  │Creation      │  │Logging   │
+│(Operational)│  │(Reference) │ │     │              │  │          │
+│(Reference)  │  │            │ │     │              │  │          │
+└──┬────┬─────┘  └┬───────┬───┘ │     └──────────────┘  └──────────┘
+   │    │        │       │      │
+   ▼    ▼        ▼       ▼      ▼
+┌────────────────────────────────────────────────────────────┐
+│              Notion Databases (7+ connected)               │
+│ ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌──────────┐        │
+│ │ System  │ │Executive │ │  Tasks  │ │  Nodes   │        │
+│ │ Inbox   │ │Intents   │ │         │ │(Knowledge)        │
+│ └─────────┘ └──────────┘ └─────────┘ └──────────┘        │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐                   │
+│ │Action    │ │Training  │ │Execution │                   │
+│ │Pipes     │ │Data      │ │Log       │                   │
+│ └──────────┘ └──────────┘ └──────────┘                   │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Phase 1 Data Flow:**
+```
+System Inbox Entry (Unprocessed)
+    ↓
+    Classify Intent (Strategic/Operational/Reference)
+    ├─ STRATEGIC → Executive Intents + Agent Router
+    ├─ OPERATIONAL → DB_Tasks + Rich Context + Audit Log
+    └─ REFERENCE → DB_Nodes + Concepts + Categories + Audit Log
+    ↓
+Update Status (Triaged_to_Intent/Task/Node)
 ```
 
 ## Setup
@@ -205,21 +249,41 @@ GET /metrics/agent/{agent_name}
 ## Key Components
 
 ### NotionPoller (`app/notion_poller.py`)
-- Async polling every 2 minutes
-- Fetches intents with `Status == "Unprocessed"`
-- Updates status: `Unprocessed` → `Processing` → `Triaged_to_Intent`
-- Creates Executive Intents in Notion
+- **Polling Service** (lines 1-61): Async 2-minute polling loop with retry logic
+- **Intent Fetching** (lines 62-85): Queries System Inbox for unprocessed items
+- **Intent Processing** (lines 87-249): Routes based on classification
+  - **Strategic Route** (lines 109-120): Uses workflow integration
+  - **Operational Route** (lines 121-173): Creates DB_Tasks with context
+  - **Reference Route** (lines 175-240): Creates DB_Nodes with concepts
+- **Audit Methods**:
+  - `_add_operational_task_context()`: Rich formatting for tasks
+  - `_log_task_creation()`: Execution Log for task creation
+  - `_log_knowledge_node_creation()`: Execution Log for node creation
 
 ### AgentRouter (`app/agent_router.py`)
 - **Intent Classification**: Strategic vs Operational vs Reference
 - **Single Agent Analysis**: Route to specific persona
 - **Dialectic Flow**: Run Growth + Risk agents, synthesize output
+- **Personas**:
+  - The Entrepreneur: Growth, revenue, scalability
+  - The Quant: Risk-adjusted returns, math analysis
+  - The Auditor: Governance, ethics, compliance
 
 ### DiffLogger (`app/diff_logger.py`)
 - Compare original AI plan vs final human-edited plan
 - Calculate acceptance rate (alignment metric)
 - Save to Notion `DB_Training_Data` + JSON log
 - Query metrics for agent performance analysis
+
+### PropertyValidator (`app/property_validator.py`)
+- **Pre-flight Checks** (lines 20-85): Validates before property creation
+- **Redundancy Detection**:
+  - Exact name matching
+  - Fuzzy name matching
+  - Semantic overlap detection
+- **Audit Logging** (lines 149-186): JSONL format with ISO timestamps
+  - Log file: `logs/property_changes.jsonl`
+  - Non-blocking (doesn't fail property creation)
 
 ## Dialectic Flow Example
 
@@ -276,6 +340,16 @@ curl http://localhost:8000/metrics/agent/The%20Entrepreneur
 
 ## Production Checklist
 
+**Phase 1 Deployment:**
+- [x] Operational Task Creation - Implemented
+- [x] Knowledge Node Creation - Implemented
+- [x] Property Validation Logging - Implemented
+- [x] Audit trail for all operations
+- [ ] End-to-end testing (all three routes)
+- [ ] Deploy to Railway for 24/7 operation
+- [ ] Monitor execution and property logs
+
+**Production Operations:**
 - [ ] Set `ENVIRONMENT=production` in Railway
 - [ ] Configure `LOG_LEVEL=WARNING` for production
 - [ ] Set up Railway metrics and alerts
@@ -283,6 +357,8 @@ curl http://localhost:8000/metrics/agent/The%20Entrepreneur
 - [ ] Configure Notion database backups
 - [ ] Set up monitoring for polling failures
 - [ ] Implement rate limiting for API endpoints
+- [ ] Monitor logs/property_changes.jsonl for schema evolution
+- [ ] Review Execution Log regularly for audit trail
 
 ## Model Configuration
 
