@@ -75,7 +75,7 @@ class TestHealthEndpoint:
             assert "databases_configured" in data
 
     def test_health_shows_database_configuration(self, test_client):
-        """Test that health shows which databases are configured."""
+        """Test that health shows all 10 configured databases."""
         with patch('main.poller', MagicMock(is_running=True)):
             response = test_client.get("/health")
 
@@ -88,6 +88,35 @@ class TestHealthEndpoint:
             assert "agent_registry" in databases
             assert "execution_log" in databases
             assert "training_data" in databases
+            assert "tasks" in databases
+            assert "projects" in databases
+            assert "areas" in databases
+            assert "nodes" in databases
+
+    def test_health_databases_match_settings(self, test_client):
+        """Enforce that every DB field in settings is reported in the health endpoint.
+
+        This test prevents regression: if a new database is added to settings.py
+        but not to the health endpoint, this test will fail.
+        """
+        from config.settings import Settings
+        import inspect
+
+        db_fields = [
+            name.replace("notion_db_", "")
+            for name in Settings.model_fields
+            if name.startswith("notion_db_")
+        ]
+
+        with patch('main.poller', MagicMock(is_running=True)):
+            response = test_client.get("/health")
+            databases = response.json()["databases_configured"]
+
+        for field in db_fields:
+            assert field in databases, (
+                f"Database '{field}' is defined in settings.py but missing from /health response. "
+                f"Add it to the health endpoint in main.py."
+            )
 
 
 @pytest.mark.api

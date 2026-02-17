@@ -96,7 +96,11 @@ async def health():
             "action_pipes": bool(settings.notion_db_action_pipes),
             "agent_registry": bool(settings.notion_db_agent_registry),
             "execution_log": bool(settings.notion_db_execution_log),
-            "training_data": bool(settings.notion_db_training_data)
+            "training_data": bool(settings.notion_db_training_data),
+            "tasks": bool(settings.notion_db_tasks),
+            "projects": bool(settings.notion_db_projects),
+            "areas": bool(settings.notion_db_areas),
+            "nodes": bool(settings.notion_db_nodes)
         }
     }
 

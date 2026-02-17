@@ -31,6 +31,10 @@ class TestSettings:
             "NOTION_DB_AGENT_REGISTRY": "registry_db_id",
             "NOTION_DB_EXECUTION_LOG": "execution_db_id",
             "NOTION_DB_TRAINING_DATA": "training_db_id",
+            "NOTION_DB_TASKS": "tasks_db_id",
+            "NOTION_DB_PROJECTS": "projects_db_id",
+            "NOTION_DB_AREAS": "areas_db_id",
+            "NOTION_DB_NODES": "nodes_db_id",
             "ANTHROPIC_API_KEY": "test_anthropic_key"
         }
 
@@ -54,6 +58,10 @@ class TestSettings:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2"
         }
 
@@ -80,6 +88,10 @@ class TestSettings:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2",
             "ENVIRONMENT": "production",
             "LOG_LEVEL": "WARNING",
@@ -111,6 +123,10 @@ class TestSettings:
             "notion_db_agent_registry": "db4",  # lowercase
             "NOTION_DB_EXECUTION_LOG": "db5",
             "notion_db_training_data": "db6",  # lowercase
+            "notion_db_tasks": "db7",  # lowercase
+            "NOTION_DB_PROJECTS": "db8",
+            "notion_db_areas": "db9",  # lowercase
+            "NOTION_DB_NODES": "db10",
             "anthropic_api_key": "key2"  # lowercase
         }
 
@@ -132,6 +148,10 @@ class TestSettings:
             "NOTION_DB_AGENT_REGISTRY": "registry_id",
             "NOTION_DB_EXECUTION_LOG": "execution_id",
             "NOTION_DB_TRAINING_DATA": "training_id",
+            "NOTION_DB_TASKS": "tasks_id",
+            "NOTION_DB_PROJECTS": "projects_id",
+            "NOTION_DB_AREAS": "areas_id",
+            "NOTION_DB_NODES": "nodes_id",
             "ANTHROPIC_API_KEY": "key2"
         }
 
@@ -146,6 +166,10 @@ class TestSettings:
         assert settings.notion_db_agent_registry == "registry_id"
         assert settings.notion_db_execution_log == "execution_id"
         assert settings.notion_db_training_data == "training_id"
+        assert settings.notion_db_tasks == "tasks_id"
+        assert settings.notion_db_projects == "projects_id"
+        assert settings.notion_db_areas == "areas_id"
+        assert settings.notion_db_nodes == "nodes_id"
 
     def test_settings_type_conversion(self, monkeypatch):
         """Test that types are converted correctly from strings."""
@@ -157,6 +181,10 @@ class TestSettings:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2",
             "POLLING_INTERVAL_SECONDS": "300",  # String that should become int
             "PORT": "8080"  # String that should become int
@@ -218,6 +246,10 @@ LOG_LEVEL=DEBUG
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2"
         }
 
@@ -241,6 +273,10 @@ class TestSettingsIntegration:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2"
         }
 
@@ -263,6 +299,10 @@ class TestSettingsIntegration:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "sk-ant-test123"
         }
 
@@ -288,6 +328,10 @@ class TestSettingsIntegration:
             "NOTION_DB_AGENT_REGISTRY": "db4",
             "NOTION_DB_EXECUTION_LOG": "db5",
             "NOTION_DB_TRAINING_DATA": "db6",
+            "NOTION_DB_TASKS": "db7",
+            "NOTION_DB_PROJECTS": "db8",
+            "NOTION_DB_AREAS": "db9",
+            "NOTION_DB_NODES": "db10",
             "ANTHROPIC_API_KEY": "key2",
             "POLLING_INTERVAL_SECONDS": "120"
         }
