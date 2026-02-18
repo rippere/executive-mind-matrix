@@ -39,25 +39,23 @@ class NotionPoller:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def poll_cycle(self):
-        """Single polling cycle - fetch and process pending intents"""
+        """Single polling cycle - fetch and process pending intents, then sweep for approved actions"""
         logger.debug("Starting poll cycle")
 
         # Fetch pending intents from System Inbox
         pending_intents = await self.fetch_pending_intents()
 
-        if not pending_intents:
+        if pending_intents:
+            logger.info(f"Found {len(pending_intents)} pending intents")
+            tasks = [self.process_intent(intent) for intent in pending_intents]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            successful = sum(1 for r in results if not isinstance(r, Exception))
+            logger.info(f"Processed {successful}/{len(pending_intents)} intents successfully")
+        else:
             logger.debug("No pending intents found")
-            return
 
-        logger.info(f"Found {len(pending_intents)} pending intents")
-
-        # Process intents concurrently
-        tasks = [self.process_intent(intent) for intent in pending_intents]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Log results
-        successful = sum(1 for r in results if not isinstance(r, Exception))
-        logger.info(f"Processed {successful}/{len(pending_intents)} intents successfully")
+        # Sweep DB_Action_Pipes for Notion-native approvals not yet diff-logged
+        await self._check_approved_actions()
 
     async def fetch_pending_intents(self) -> List[Dict[str, Any]]:
         """Fetch all intents with Status == 'Pending' from System Inbox"""
@@ -591,6 +589,64 @@ Priority: {classification.get('impact', 5)}/10"""
         except Exception as e:
             logger.warning(f"Could not log knowledge node creation: {e}")
             # Don't raise - node creation still succeeded
+
+    async def _check_approved_actions(self) -> None:
+        """
+        Sweep DB_Action_Pipes for Action Pipes that were approved directly in Notion
+        (not via the /action/{id}/approve API) and haven't had their settlement diff logged.
+
+        Filters for: Approval_Status = Approved AND Diff_Logged checkbox is false/unchecked.
+        If Diff_Logged doesn't exist in the schema yet, falls back to processing all Approved
+        actions (idempotent — duplicate writes are benign noise in training data).
+        """
+        try:
+            # Try the precise filter first (requires Diff_Logged checkbox in schema)
+            try:
+                response = await self.client.databases.query(
+                    database_id=settings.notion_db_action_pipes,
+                    filter={
+                        "and": [
+                            {
+                                "property": "Approval_Status",
+                                "select": {"equals": "Approved"}
+                            },
+                            {
+                                "property": "Diff_Logged",
+                                "checkbox": {"equals": False}
+                            }
+                        ]
+                    }
+                )
+            except Exception:
+                # Diff_Logged property doesn't exist in schema yet — fall back to all Approved
+                response = await self.client.databases.query(
+                    database_id=settings.notion_db_action_pipes,
+                    filter={
+                        "property": "Approval_Status",
+                        "select": {"equals": "Approved"}
+                    }
+                )
+
+            action_pages = response.get("results", [])
+            if not action_pages:
+                logger.debug("No unlogged approved actions found")
+                return
+
+            logger.info(f"Found {len(action_pages)} approved action(s) pending diff logging")
+
+            from app.workflow_integration import WorkflowIntegration
+            workflow = WorkflowIntegration(self.client)
+
+            for action_page in action_pages:
+                action_id = action_page["id"]
+                try:
+                    await workflow._log_settlement_diff_from_action(action_id)
+                except Exception as e:
+                    logger.warning(f"Poller: diff logging failed for action {action_id[:8]}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error sweeping approved actions: {e}")
+            # Never let this kill the poll cycle
 
     @staticmethod
     def extract_text_property(prop: Dict[str, Any]) -> str:
