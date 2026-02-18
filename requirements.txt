@@ -30,6 +30,11 @@ prometheus-fastapi-instrumentator==7.0.0
 
 # Data Processing
 deepdiff==6.7.1
+aiofiles>=23.2.1
+
+# Analytics (Fine-Tuning Pipeline)
+pandas>=2.1.0
+numpy>=1.24.0
 
 # Security
 slowapi==0.1.9

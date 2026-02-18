@@ -547,6 +547,119 @@ async def spawn_tasks_from_action(action_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Fine-Tuning Analytics Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/analytics/agents/summary")
+async def get_agents_summary(time_range: str = "30d"):
+    """
+    Performance summary for all agents.
+
+    time_range options: 7d | 30d | 90d | all
+    """
+    if time_range not in ("7d", "30d", "90d", "all"):
+        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
+
+    try:
+        from app.training_analytics import TrainingAnalytics
+        analytics = TrainingAnalytics()
+        summary = await analytics.get_agent_performance_summary(time_range=time_range)
+        return {"status": "success", **summary}
+    except Exception as e:
+        logger.error(f"Error fetching agent summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analytics/agent/{agent_name}/improvements")
+async def get_improvement_opportunities(
+    agent_name: str,
+    time_range: str = "30d",
+):
+    """
+    Identify prompt improvement opportunities for a specific agent.
+
+    agent_name: "The Entrepreneur" | "The Quant" | "The Auditor"
+    """
+    if time_range not in ("7d", "30d", "90d", "all"):
+        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
+
+    try:
+        from app.training_analytics import TrainingAnalytics
+        analytics = TrainingAnalytics()
+        result = await analytics.identify_improvement_opportunities(
+            agent_name=agent_name,
+            time_range=time_range,
+        )
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"Error identifying improvements for {agent_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analytics/compare")
+async def compare_agents(
+    agent_a: str,
+    agent_b: str,
+    time_range: str = "30d",
+):
+    """
+    Head-to-head comparison of two agents.
+
+    Example: /analytics/compare?agent_a=The Entrepreneur&agent_b=The Auditor
+    """
+    if time_range not in ("7d", "30d", "90d", "all"):
+        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
+
+    try:
+        from app.training_analytics import TrainingAnalytics
+        analytics = TrainingAnalytics()
+        comparison = await analytics.compare_agents(
+            agent_a=agent_a,
+            agent_b=agent_b,
+            time_range=time_range,
+        )
+        return {"status": "success", "comparison": comparison.model_dump()}
+    except Exception as e:
+        logger.error(f"Error comparing agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analytics/export/fine-tuning")
+async def export_fine_tuning_data(
+    min_acceptance_rate: float = 0.7,
+    agent_name: str = None,
+    time_range: str = "all",
+    output_path: str = "data/finetuning_export.jsonl",
+):
+    """
+    Export training data as JSONL for Claude fine-tuning.
+
+    Only includes records at or above min_acceptance_rate (0–1).
+    Optionally filter to a specific agent and/or time range.
+    Returns path, example count, and validation report.
+    """
+    if not 0.0 <= min_acceptance_rate <= 1.0:
+        raise HTTPException(status_code=400, detail="min_acceptance_rate must be between 0.0 and 1.0")
+
+    if time_range not in ("7d", "30d", "90d", "all"):
+        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
+
+    try:
+        from app.training_analytics import TrainingAnalytics
+        analytics = TrainingAnalytics()
+        result = await analytics.export_for_fine_tuning(
+            output_path=output_path,
+            min_acceptance_rate=min_acceptance_rate,
+            agent_name=agent_name,
+            time_range=time_range,
+        )
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"Error exporting fine-tuning data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

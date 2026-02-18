@@ -113,3 +113,71 @@ class AreaAssignment(BaseModel):
     area_name: str
     area_id: Optional[str] = None
     confidence: float = Field(ge=0.0, le=1.0)
+
+
+# --- Fine-Tuning Pipeline Models ---
+
+class TrainingRecord(BaseModel):
+    """A parsed record from DB_Training_Data"""
+    notion_page_id: str
+    intent_id: str
+    timestamp: datetime
+    acceptance_rate: float
+    modifications_count: int
+    modifications: List[str]
+    original_plan: Dict[str, Any]
+    final_plan: Dict[str, Any]
+    agent_name: Optional[str] = None  # Populated via intent lookup
+
+
+class AgentPerformanceSummary(BaseModel):
+    """Aggregated performance metrics for a single agent"""
+    agent_name: str
+    time_range: str
+    total_settlements: int
+    avg_acceptance_rate: float
+    min_acceptance_rate: float
+    max_acceptance_rate: float
+    acceptance_trend: List[float] = Field(default_factory=list)  # chronological
+    common_modification_types: Dict[str, int] = Field(default_factory=dict)
+    low_acceptance_count: int = 0  # settlements below 70%
+
+
+class EditPattern(BaseModel):
+    """A detected pattern in user edits across settlements"""
+    pattern_type: str  # "deletion", "addition", "tone_shift"
+    pattern_text: str
+    frequency: float  # 0.0 - 1.0, fraction of records containing this
+    occurrence_count: int
+    agent_name: Optional[str] = None
+    recommendation: str
+
+
+class AgentComparison(BaseModel):
+    """Head-to-head comparison of two agents"""
+    agent_a: str
+    agent_b: str
+    agent_a_avg_acceptance: float
+    agent_b_avg_acceptance: float
+    agent_a_total_settlements: int
+    agent_b_total_settlements: int
+    winner: str  # agent name or "tie"
+    delta: float  # acceptance rate difference
+
+
+class FinetuningExample(BaseModel):
+    """A single JSONL example for Claude fine-tuning"""
+    messages: List[Dict[str, str]]  # role + content pairs
+    source_intent_id: str
+    acceptance_rate: float
+
+
+class DatasetValidationReport(BaseModel):
+    """Validation results for a fine-tuning JSONL dataset"""
+    jsonl_path: str
+    total_examples: int
+    valid_examples: int
+    invalid_examples: int
+    errors: List[str] = Field(default_factory=list)
+    avg_acceptance_rate: float
+    ready_for_finetuning: bool
