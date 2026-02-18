@@ -487,33 +487,43 @@ class ContinuousLearning:
 
 ## Implementation Priorities
 
-### Sprint 1 (Week 1):
+### Sprint 1 (2026-02-18) — COMPLETE ✅
 - ✅ Ensure AI_Raw_Output property is set up
 - ✅ Verify diff_logger is capturing data correctly
-- ⬜ Build `TrainingAnalytics` module
-- ⬜ Add analytics API endpoints
+- ✅ Build `TrainingAnalytics` module (`app/training_analytics.py`)
+- ✅ Add analytics API endpoints (`/analytics/*`)
+- ✅ Build `EditPatternAnalyzer` (`app/fine_tuning/pattern_analysis.py`)
+- ✅ Build `FineTuningDataPrep` + JSONL export (`app/fine_tuning/data_export.py`)
+- ✅ Close training data collection loop (auto-logging on approval + poller sweep)
+- ✅ Tag training records with agent name
 
-### Sprint 2 (Week 2):
-- ⬜ Implement pattern detection
-- ⬜ Build basic dashboard for visualizing metrics
-- ⬜ Create alert system for performance drops
+### Sprint 1 Pending (Notion schema — manual):
+- ⬜ Add `Agent_Name` (Select) to Training Data database
+- ⬜ Add `Diff_Logged` (Checkbox) to Action Pipes database
 
-### Sprint 3 (Week 3):
-- ⬜ Build `PromptOptimizer` module
-- ⬜ Create prompt variant generator
+### Sprint 2 (Next):
+- ⬜ Collect real settlements — run dialectics, approve Action Pipes, verify data flows
+- ⬜ Hit `/analytics/agents/summary` and confirm per-agent metrics appear
+- ⬜ Review `/analytics/agent/{name}/improvements` output quality on real data
+- ⬜ Create alert when any agent drops below 70% acceptance rate
+
+### Sprint 3:
+- ⬜ Build `PromptOptimizer` module (`app/fine_tuning/prompt_optimizer.py`)
+- ⬜ Create prompt variant generator using Claude
 - ⬜ Manual testing of prompt improvements
 
-### Sprint 4 (Week 4):
-- ⬜ Implement A/B testing framework
+### Sprint 4:
+- ⬜ Implement A/B testing framework (`app/fine_tuning/ab_testing.py`)
 - ⬜ Create `DB_AB_Tests` in Notion
 - ⬜ Run first A/B test
 
-### Sprint 5 (Month 2):
-- ⬜ Export training data for fine-tuning
+### Sprint 5 (100+ settlements required):
+- ⬜ Export training data via `POST /analytics/export/fine-tuning`
+- ⬜ Validate dataset (50+ examples, format check)
 - ⬜ Request Anthropic fine-tuning access
 - ⬜ Prepare fine-tuning dataset
 
-### Sprint 6 (Month 3+):
+### Sprint 6:
 - ⬜ Deploy fine-tuned models
 - ⬜ Continuous monitoring and iteration
 
