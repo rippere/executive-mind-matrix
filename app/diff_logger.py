@@ -21,7 +21,6 @@ class DiffLogger:
         original_plan: Dict[str, Any],
         final_plan: Dict[str, Any],
         agent_name: str = None,
-        action_id: str = None,
     ) -> SettlementDiff:
         """
         Compare AI-generated plan vs human-edited final plan.
@@ -51,7 +50,7 @@ class DiffLogger:
         )
 
         # Save to Notion Training Data database
-        await self._save_to_notion(settlement_diff, agent_name=agent_name, action_id=action_id)
+        await self._save_to_notion(settlement_diff, agent_name=agent_name)
 
         # Also save to local JSON log (backup)
         await self._save_to_json_log(settlement_diff)
@@ -135,7 +134,7 @@ class DiffLogger:
             count += 1
         return count
 
-    async def _save_to_notion(self, diff: SettlementDiff, agent_name: str = None, action_id: str = None):
+    async def _save_to_notion(self, diff: SettlementDiff, agent_name: str = None):
         """Save settlement diff to Notion Training Data database"""
         try:
             properties = {
@@ -185,14 +184,11 @@ class DiffLogger:
                 }
             }
 
-            # Optionally tag with agent name and source action (graceful if schema doesn't have these yet)
+            # Tag with agent name — requires Agent_Name (Select) in DB_Training_Data schema
+            # Fails silently if property not yet added to Notion
             if agent_name:
                 properties["Agent_Name"] = {
                     "select": {"name": agent_name}
-                }
-            if action_id:
-                properties["Action_ID"] = {
-                    "rich_text": [{"text": {"content": action_id}}]
                 }
 
             await self.client.pages.create(
