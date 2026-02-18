@@ -990,7 +990,6 @@ Focus: Compliance, governance, long-term sustainability"""
                 original_plan=original_plan,
                 final_plan=final_plan,
                 agent_name=agent_name,
-                action_id=action_id,
             )
 
             # Mark as diff-logged on the Action Pipe so the poller won't re-process it
