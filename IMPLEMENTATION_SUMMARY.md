@@ -3,8 +3,63 @@
 ## 🚀 Deployment Status
 
 **Live URL**: `https://web-production-3d888.up.railway.app`
-**Last Updated**: 2026-02-17
-**Status**: Production — all three triage routes operational
+**Last Updated**: 2026-02-18
+**Status**: Production — Phase 2 fine-tuning pipeline deployed
+
+---
+
+## 🔧 Session Work (2026-02-18) — Fine-Tuning Pipeline
+
+### What Was Built
+
+#### Phase 2: Fine-Tuning Pipeline (Data Aggregation + Export)
+
+**New modules deployed:**
+
+| File | Purpose |
+|------|---------|
+| `app/fine_tuning/__init__.py` | Module entry point |
+| `app/fine_tuning/pattern_analysis.py` | `EditPatternAnalyzer` — detects deletion/addition patterns and tone shifts in user edits using lightweight string analysis (no heavy NLP, Railway-lean) |
+| `app/fine_tuning/data_export.py` | `FineTuningDataPrep` — exports JSONL in Anthropic fine-tuning format with dataset validation |
+| `app/training_analytics.py` | `TrainingAnalytics` — orchestrates Notion queries, pattern analysis, agent comparison, and JSONL export |
+
+**New API endpoints (main.py):**
+- `GET /analytics/agents/summary?time_range=30d` — performance metrics for all agents
+- `GET /analytics/agent/{agent_name}/improvements` — deletion/addition patterns + recommendations
+- `GET /analytics/compare?agent_a=...&agent_b=...` — head-to-head agent comparison
+- `POST /analytics/export/fine-tuning` — export JSONL for Claude fine-tuning
+
+**New Pydantic models (app/models.py):**
+`TrainingRecord`, `AgentPerformanceSummary`, `EditPattern`, `AgentComparison`, `FinetuningExample`, `DatasetValidationReport`
+
+**Dependencies added (requirements.txt):**
+`aiofiles>=23.2.1`, `pandas>=2.1.0`, `numpy>=1.24.0`
+
+#### Closed the Training Data Collection Loop
+
+The pipeline had no data because nothing was calling `log_settlement_diff()` automatically. Fixed in the same session:
+
+- **`app/workflow_integration.py`**: `approve_action()` now calls `_log_settlement_diff_from_action()` immediately on approval. Captures `AI_Raw_Output` (original) vs current field values (final), tagged with agent name.
+- **`app/notion_poller.py`**: `poll_cycle()` now sweeps `DB_Action_Pipes` every 2 minutes for Notion-native approvals (user changed status directly in Notion) using `Diff_Logged` checkbox for idempotent de-duplication.
+- **`app/diff_logger.py`**: Extended with optional `agent_name` param; writes `Agent_Name` (Select) to DB_Training_Data when present.
+
+#### Schema Redundancy Fix
+
+Caught and removed `Action_ID` from Training Data before it was written:
+- `Action_ID` already exists in `DB_Action_Pipes` as a `number` (sequential counter)
+- Writing the Notion page UUID under the same name into a different database was dead weight with a naming collision
+- `Intent_ID` (already in Training Data schema) is the correct and sufficient link
+
+### Pending Notion Schema Changes (One-Time Manual Steps)
+
+Two genuinely new properties required — no overlap with existing schema:
+
+| Database | Property | Type | Why |
+|----------|----------|------|-----|
+| Training Data | `Agent_Name` | Select | Lets analytics filter/group by agent — critical for per-agent insights |
+| Action Pipes | `Diff_Logged` | Checkbox | Prevents poller re-processing same approval every 2 minutes |
+
+Code is graceful — these are optional. Writes fail silently if properties don't exist yet. Add them in Notion to unlock full functionality.
 
 ---
 
@@ -61,26 +116,70 @@ A production-ready Python backend for the Executive Mind Matrix system with all 
 executive-mind-matrix/
 ├── app/
 │   ├── __init__.py
-│   ├── models.py              # Pydantic models for data validation
-│   ├── notion_poller.py       # 2-minute async polling service
+│   ├── models.py              # Pydantic models (Phase 1 + 2)
+│   ├── notion_poller.py       # 2-minute async polling + approval sweep
 │   ├── agent_router.py        # Adversarial agent dialectic system
-│   └── diff_logger.py         # Training data capture (AI vs Human)
+│   ├── diff_logger.py         # Training data capture (AI vs Human)
+│   ├── workflow_integration.py # Approval hook + auto diff logging
+│   ├── training_analytics.py  # Fine-tuning pipeline orchestrator (Phase 2)
+│   └── fine_tuning/           # Fine-tuning package (Phase 2)
+│       ├── __init__.py
+│       ├── pattern_analysis.py  # EditPatternAnalyzer
+│       └── data_export.py       # FineTuningDataPrep + JSONL export
 ├── config/
 │   ├── __init__.py
 │   └── settings.py            # Environment-based configuration
+├── data/                      # JSONL fine-tuning exports (auto-created)
 ├── logs/                      # Auto-created log directory
 ├── main.py                    # FastAPI application entry point
 ├── requirements.txt           # Python dependencies
 ├── Dockerfile                 # Optimized for Railway deployment
-├── .dockerignore             # Docker build optimization
-├── railway.json              # Railway configuration
-├── Procfile                  # Alternative deployment config
-├── .env.example              # Environment variable template
-├── .gitignore               # Git ignore rules
-├── start.sh                 # Quick start script
-└── README.md                # Comprehensive documentation
-
+├── railway.json               # Railway configuration
+└── .env.example               # Environment variable template
 ```
+
+## ✅ Phase 2 Features - Complete (2026-02-18)
+
+### Fine-Tuning Pipeline
+
+#### 1. **TrainingAnalytics** ✅
+**File**: `app/training_analytics.py`
+
+Orchestrates all fine-tuning pipeline operations:
+- Queries Notion DB_Training_Data with time range + agent filters + pagination
+- Builds per-agent performance summaries with acceptance rate trends
+- Drives EditPatternAnalyzer for improvement opportunities
+- Runs head-to-head agent comparisons
+- Exports JSONL with intent description enrichment (looks up source Executive Intent)
+
+#### 2. **EditPatternAnalyzer** ✅
+**File**: `app/fine_tuning/pattern_analysis.py`
+
+Lightweight pattern detection (no spacy/transformers — Railway-lean):
+- Deletion patterns: ngrams in original not in final (what users strip out)
+- Addition patterns: ngrams in final not in original (what agents are missing)
+- Tone shifts: length deltas, prose↔bullet structure changes
+- Filler phrase detection: known AI hedging language scored separately
+- Synthesizes all patterns into prioritized prompt recommendations
+
+#### 3. **FineTuningDataPrep** ✅
+**File**: `app/fine_tuning/data_export.py`
+
+Exports training data in Anthropic fine-tuning JSONL format:
+- Filters by min_acceptance_rate, agent_name, time_range
+- Format: system (agent persona) + user (intent) + assistant (human-approved output)
+- Dataset validation: checks format, message structure, 50+ example minimum
+- Agent system prompts mirror the prompts in `agent_router.py` — keep these in sync when refining
+
+#### 4. **Automated Settlement Capture** ✅
+**Files**: `app/workflow_integration.py`, `app/notion_poller.py`, `app/diff_logger.py`
+
+Closed the training data collection loop:
+- `approve_action()` → auto-captures diff immediately on API approval
+- Poller sweep → catches Notion-native approvals every 2 minutes
+- Agent name tagged on every training record via Agent relation lookup
+
+---
 
 ## ✅ Phase 1 Features - Complete
 
@@ -246,8 +345,13 @@ Logs all property additions to structured JSONL:
 - `POST /trigger-poll`: Manual poll trigger (testing)
 - `POST /analyze-intent/{intent_id}`: Single agent analysis
 - `POST /dialectic/{intent_id}`: Adversarial dialectic flow
-- `POST /log-settlement`: Capture AI vs Human diff
+- `POST /action/{action_id}/approve`: Approve + auto-log settlement diff
+- `POST /log-settlement`: Manual diff capture
 - `GET /metrics/agent/{agent_name}`: Agent performance stats
+- `GET /analytics/agents/summary`: All-agent performance summary (Phase 2)
+- `GET /analytics/agent/{agent_name}/improvements`: Pattern analysis + recommendations (Phase 2)
+- `GET /analytics/compare`: Head-to-head agent comparison (Phase 2)
+- `POST /analytics/export/fine-tuning`: Export JSONL for Claude fine-tuning (Phase 2)
 
 **Features**:
 - Async lifecycle management
@@ -456,26 +560,34 @@ This codebase is designed to be AI-readable and extensible. To collaborate with 
    - Add more sophisticated synthesis algorithms
    - Implement webhook triggers (Notion API updates)
 
-## 📈 Next Steps / Enhancements
+## 📈 Next Steps
 
-### Phase 1 Deployment Checklist:
-- [x] Operational Task Creation - Implemented & Tested
-- [x] Knowledge Node Creation - Implemented & Tested
-- [x] Property Validation Logging - Implemented & Tested
-- [ ] End-to-End Testing with all three routes (strategic, operational, reference)
-- [ ] Deploy to Railway for 24/7 operation
-- [ ] Monitor execution logs for proper audit trail
+### Immediate (requires manual Notion action):
+- [ ] Add `Agent_Name` (Select) property to Training Data database
+- [ ] Add `Diff_Logged` (Checkbox) property to Action Pipes database
+- [ ] Run a dialectic + approve an Action Pipe → verify training record appears in Training Data
+- [ ] Hit `/analytics/agents/summary` to confirm data flowing
 
-### Future Enhancements (Phase 2+):
-1. **Fine-tuning Pipeline** - Use training data to improve agent prompts
-2. **Webhooks** - Real-time triggers instead of 2-minute polling
-3. **Web Dashboard** - Visualize agent performance, acceptance rates, task completion
-4. **A/B Testing** - Test different agent personas against each other
-5. **Advanced Knowledge Graph** - Semantic relationships between nodes
-6. **Multi-tenancy** - Support multiple users/workspaces
-7. **Caching** - Redis for frequently accessed Notion data
-8. **Advanced Monitoring** - Sentry for error tracking, Prometheus for metrics
-9. **Property Change Analytics** - Analyze schema evolution trends from logs
+### Phase 3 — A/B Testing Framework:
+- `ABTestManager` class (see FINE_TUNING_PIPELINE_DESIGN.md Phase 4)
+- `DB_AB_Tests` Notion database
+- Route traffic between prompt variants based on split percentage
+- Statistical significance testing on results
+
+### Phase 4 — PromptOptimizer:
+- Uses Claude to generate prompt variants from identified patterns
+- Admin review → select variant → deploy
+- Track performance under new prompt vs baseline
+
+### Phase 5 — Fine-Tuning Export + Submission:
+- Collect 100+ high-quality settlements (acceptance rate > 70%)
+- Run `/analytics/export/fine-tuning` to generate JSONL
+- Validate dataset (50+ examples minimum)
+- Submit to Anthropic fine-tuning when available
+
+### Ongoing:
+- Model upgrade: Haiku → Claude Sonnet (`ANTHROPIC_MODEL` env var in Railway)
+- Deploy `main_enhanced.py` (Sentry + Prometheus)
 
 ## 💰 Cost Estimate
 

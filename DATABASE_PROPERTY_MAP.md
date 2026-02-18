@@ -6,12 +6,12 @@
 
 ## Action Pipes
 
-**19 properties**
+**19 properties + 1 pending**
 
 | Property Name | Type | Notes |
 |---------------|------|-------|
 | AI_Raw_Output | `rich_text` |  |
-| Action_ID | `number` |  |
+| Action_ID | `number` | Sequential counter |
 | Action_Title | `title` |  |
 | Agent | `relation` |  |
 | Analysis_Date | `created_time` | Temporal tracking |
@@ -19,6 +19,7 @@
 | Approved_Date | `date` | Temporal tracking |
 | Auditor_Recommendation | `select` | Agent recommendation |
 | Consensus | `checkbox` |  |
+| Diff_Logged | `checkbox` | **PENDING — add manually.** Prevents poller re-processing approved actions every 2 min |
 | Entrepreneur_Recommendation | `select` | Agent recommendation |
 | Final_Decision | `select` |  |
 | Intent | `relation` |  |
@@ -190,16 +191,17 @@
 
 ## Training Data
 
-**8 properties**
+**8 properties + 1 pending**
 
 | Property Name | Type | Notes |
 |---------------|------|-------|
-| Acceptance_Rate | `number` |  |
-| Final_Plan | `rich_text` |  |
-| Intent_ID | `rich_text` |  |
-| Modifications | `rich_text` |  |
+| Acceptance_Rate | `number` | Stored as 0–100; code normalises to 0–1 |
+| Agent_Name | `select` | **PENDING — add manually.** Required for per-agent analytics and fine-tuning export filtering |
+| Final_Plan | `rich_text` | Human-approved output (assistant turn in fine-tuning JSONL) |
+| Intent_ID | `rich_text` | Notion page ID of source Executive Intent |
+| Modifications | `rich_text` | Human-readable list of changes |
 | Modifications_Count | `number` |  |
-| Original_Plan | `rich_text` |  |
+| Original_Plan | `rich_text` | Raw AI output at time of dialectic analysis |
 | Timestamp | `date` |  |
 | Title | `title` |  |
 
