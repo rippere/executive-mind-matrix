@@ -9,6 +9,9 @@ from config.settings import settings
 from app.models import NotionIntent, IntentStatus
 from app.command_center import CommandCenterSync
 
+# Module-level lock to prevent race conditions in sequential ID generation
+_log_id_lock = asyncio.Lock()
+
 
 class NotionPoller:
     """Async poller service for Notion databases - checks every 2 minutes"""
@@ -525,23 +528,24 @@ Priority: {classification.get('impact', 5)}/10"""
             # Don't raise - task creation still succeeded
 
     async def _get_next_log_id(self) -> int:
-        """Get next sequential Log ID from Execution Log"""
-        try:
-            response = await self.client.databases.query(
-                database_id=settings.notion_db_execution_log,
-                page_size=100
-            )
+        """Get next sequential Log ID from Execution Log (thread-safe)"""
+        async with _log_id_lock:
+            try:
+                response = await self.client.databases.query(
+                    database_id=settings.notion_db_execution_log,
+                    page_size=100
+                )
 
-            max_id = 0
-            for page in response.get("results", []):
-                log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
-                if log_id and log_id > max_id:
-                    max_id = log_id
+                max_id = 0
+                for page in response.get("results", []):
+                    log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
+                    if log_id and log_id > max_id:
+                        max_id = log_id
 
-            return max_id + 1
-        except Exception as e:
-            logger.warning(f"Error getting next log ID, defaulting to 1: {e}")
-            return 1
+                return max_id + 1
+            except Exception as e:
+                logger.warning(f"Error getting next log ID, defaulting to 1: {e}")
+                return 1
 
     async def _log_knowledge_node_creation(
         self,

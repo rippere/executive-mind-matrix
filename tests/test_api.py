@@ -481,8 +481,10 @@ class TestActionPipePropertyPopulation:
                 assert "Task_Generation_Template" in properties, "Task_Generation_Template should be populated"
                 assert len(properties["Task_Generation_Template"]["rich_text"]) > 0, "Task_Generation_Template should have content"
 
-                assert "AI_Raw_Output" in properties, "AI_Raw_Output should be populated"
-                assert len(properties["AI_Raw_Output"]["rich_text"]) > 0, "AI_Raw_Output should have content"
+                # AI_Raw_Output is now stored in page blocks, not properties
+                # Verify that blocks.children.append was called to store it
+                append_calls = [call for call in mock_notion.blocks.children.append.call_args_list]
+                assert len(append_calls) > 0, "AI_Raw_Output should be saved as page blocks"
 
 
 @pytest.mark.api

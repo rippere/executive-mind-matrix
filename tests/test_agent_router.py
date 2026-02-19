@@ -440,10 +440,15 @@ class TestSaveRawAiOutput:
 
         await agent_router._save_raw_ai_output("intent_123", sample_dialectic_output)
 
-        mock_notion_client.pages.update.assert_called_once()
-        call_args = mock_notion_client.pages.update.call_args
-        assert call_args.kwargs["page_id"] == "pipe_123"
-        assert "AI_Raw_Output" in call_args.kwargs["properties"]
+        # AI_Raw_Output is now stored as page blocks, not properties
+        mock_notion_client.blocks.children.append.assert_called_once()
+        call_args = mock_notion_client.blocks.children.append.call_args
+        assert call_args.kwargs["block_id"] == "pipe_123"
+        # Verify it contains a callout and code block
+        children = call_args.kwargs["children"]
+        assert len(children) == 2
+        assert children[0]["type"] == "callout"
+        assert children[1]["type"] == "code"
 
     @pytest.mark.asyncio
     async def test_save_raw_output_handles_no_action_pipe(
@@ -455,7 +460,8 @@ class TestSaveRawAiOutput:
         # Should not raise error
         await agent_router._save_raw_ai_output("intent_123", sample_dialectic_output)
 
-        mock_notion_client.pages.update.assert_not_called()
+        # Should not attempt to append blocks since no action pipe was found
+        mock_notion_client.blocks.children.append.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_save_raw_output_handles_errors(

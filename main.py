@@ -233,7 +233,7 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
         task_template = result.growth_perspective.task_generation_template if result.growth_perspective else []
         task_template_text = "\n".join(f"- {task}" for task in task_template) if task_template else "No tasks specified"
 
-        # Preserve full AI output for debugging and training
+        # Preserve FULL AI output for debugging and training (no truncation)
         ai_raw_output = {
             "growth_analysis": result.growth_perspective.dict() if result.growth_perspective else None,
             "risk_analysis": result.risk_perspective.dict() if result.risk_perspective else None,
@@ -241,7 +241,7 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
             "recommended_path": result.recommended_path,
             "conflict_points": result.conflict_points
         }
-        ai_raw_text = json.dumps(ai_raw_output, indent=2)[:2000]
+        ai_raw_text = json.dumps(ai_raw_output, indent=2)
 
         action_response = await client.pages.create(
             parent={"database_id": settings.notion_db_action_pipes},
@@ -270,9 +270,6 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
                 "Task_Generation_Template": {
                     "rich_text": [{"text": {"content": task_template_text[:2000]}}]
                 },
-                "AI_Raw_Output": {
-                    "rich_text": [{"text": {"content": ai_raw_text}}]
-                },
                 "Approval_Status": {
                     "select": {"name": "Pending"}
                 },
@@ -282,6 +279,42 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
             }
         )
         action_id = action_response["id"]
+
+        # Store AI_Raw_Output as page body blocks (no character limit)
+        # This prevents truncation that was corrupting training data
+        try:
+            await client.blocks.children.append(
+                block_id=action_id,
+                children=[
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [{
+                                "type": "text",
+                                "text": {"content": "🔒 AI Raw Output (Do Not Edit)"}
+                            }],
+                            "icon": {"emoji": "🔒"},
+                            "color": "gray_background"
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "code",
+                        "code": {
+                            "rich_text": [{
+                                "type": "text",
+                                "text": {"content": ai_raw_text}
+                            }],
+                            "language": "json"
+                        }
+                    }
+                ]
+            )
+            logger.info(f"Saved raw AI output as page blocks ({len(ai_raw_text)} chars)")
+        except Exception as e:
+            logger.warning(f"Failed to save AI raw output blocks: {e}")
+            # Don't fail the whole request if this fails
 
         return {
             "status": "success",

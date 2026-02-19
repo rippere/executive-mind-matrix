@@ -60,4 +60,4 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Run the application with production settings
 # Railway provides PORT as an environment variable
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log
+CMD uvicorn main_enhanced:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log
