@@ -224,3 +224,9 @@ tmp/
 .coverage
 coverage.xml
 htmlcov/
+
+# Codebase dumps and audit reports (contain secrets)
+codebase_dump.txt
+notion_schema_audit_report.md
+SCHEMA_AUDIT_SUMMARY.txt
+notion_schema_audit.py

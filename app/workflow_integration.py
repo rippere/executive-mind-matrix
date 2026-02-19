@@ -16,6 +16,10 @@ from app.areas_manager import AreasManager
 from app.knowledge_linker import KnowledgeLinker
 from app.task_spawner import TaskSpawner
 
+# Module-level locks to prevent race conditions in sequential ID generation
+_intent_id_lock = asyncio.Lock()
+_log_id_lock = asyncio.Lock()
+
 
 class WorkflowIntegration:
     """Manages the complete workflow integration across all databases"""
@@ -817,23 +821,24 @@ Focus: Compliance, governance, long-term sustainability"""
             return "P2"
 
     async def _get_next_intent_id(self) -> int:
-        """Get next sequential Intent ID"""
-        try:
-            # Get all intents and find max ID
-            response = await self.client.databases.query(
-                database_id=settings.notion_db_executive_intents,
-                page_size=100
-            )
+        """Get next sequential Intent ID (thread-safe)"""
+        async with _intent_id_lock:
+            try:
+                # Get all intents and find max ID
+                response = await self.client.databases.query(
+                    database_id=settings.notion_db_executive_intents,
+                    page_size=100
+                )
 
-            max_id = 0
-            for page in response.get("results", []):
-                intent_id = page.get("properties", {}).get("Intent ID", {}).get("number")
-                if intent_id and intent_id > max_id:
-                    max_id = intent_id
+                max_id = 0
+                for page in response.get("results", []):
+                    intent_id = page.get("properties", {}).get("Intent ID", {}).get("number")
+                    if intent_id and intent_id > max_id:
+                        max_id = intent_id
 
-            return max_id + 1
-        except:
-            return 1
+                return max_id + 1
+            except:
+                return 1
 
     def _calculate_due_date(self, impact: int) -> str:
         """Calculate due date based on impact/priority"""
@@ -950,8 +955,13 @@ Focus: Compliance, governance, long-term sustainability"""
             props = action_page.get("properties", {})
 
             # Original plan: what the AI generated
-            ai_raw_items = props.get("AI_Raw_Output", {}).get("rich_text", [])
-            ai_raw_text = ai_raw_items[0]["text"]["content"] if ai_raw_items else ""
+            # Read from page blocks instead of property to avoid truncation
+            ai_raw_text = await self._read_ai_raw_output_from_blocks(action_id)
+
+            # Fallback: try reading from old property-based storage for backwards compatibility
+            if not ai_raw_text.strip():
+                ai_raw_items = props.get("AI_Raw_Output", {}).get("rich_text", [])
+                ai_raw_text = ai_raw_items[0]["text"]["content"] if ai_raw_items else ""
 
             if not ai_raw_text.strip():
                 logger.debug(f"No AI_Raw_Output on action {action_id[:8]}, skipping diff log")
@@ -1021,6 +1031,40 @@ Focus: Compliance, governance, long-term sustainability"""
         except Exception:
             return None
 
+    async def _read_ai_raw_output_from_blocks(self, page_id: str) -> str:
+        """
+        Read AI_Raw_Output from page body blocks (code block).
+        This avoids the 2000 character truncation that was corrupting training data.
+
+        Returns the full JSON text or empty string if not found.
+        """
+        try:
+            blocks = await self.client.blocks.children.list(block_id=page_id)
+
+            # Look for the code block that contains AI raw output
+            # It should be preceded by a callout with "AI Raw Output"
+            for i, block in enumerate(blocks.get("results", [])):
+                # Check if this is our callout marker
+                if block.get("type") == "callout":
+                    callout_text = ""
+                    for rt in block.get("callout", {}).get("rich_text", []):
+                        callout_text += rt.get("text", {}).get("content", "")
+
+                    if "AI Raw Output" in callout_text:
+                        # The next block should be the code block with the JSON
+                        if i + 1 < len(blocks["results"]):
+                            next_block = blocks["results"][i + 1]
+                            if next_block.get("type") == "code":
+                                code_content = ""
+                                for rt in next_block.get("code", {}).get("rich_text", []):
+                                    code_content += rt.get("text", {}).get("content", "")
+                                return code_content
+
+            return ""
+        except Exception as e:
+            logger.warning(f"Error reading AI raw output from blocks: {e}")
+            return ""
+
     async def _log_execution(
         self,
         action: str,
@@ -1062,19 +1106,20 @@ Focus: Compliance, governance, long-term sustainability"""
             logger.warning(f"Could not log execution: {e}")
 
     async def _get_next_log_id(self) -> int:
-        """Get next sequential Log ID"""
-        try:
-            response = await self.client.databases.query(
-                database_id=settings.notion_db_execution_log,
-                page_size=100
-            )
+        """Get next sequential Log ID (thread-safe)"""
+        async with _log_id_lock:
+            try:
+                response = await self.client.databases.query(
+                    database_id=settings.notion_db_execution_log,
+                    page_size=100
+                )
 
-            max_id = 0
-            for page in response.get("results", []):
-                log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
-                if log_id and log_id > max_id:
-                    max_id = log_id
+                max_id = 0
+                for page in response.get("results", []):
+                    log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
+                    if log_id and log_id > max_id:
+                        max_id = log_id
 
-            return max_id + 1
-        except:
-            return 1
+                return max_id + 1
+            except:
+                return 1
