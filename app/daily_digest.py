@@ -22,7 +22,6 @@ from notion_client import AsyncClient
 import aiohttp
 
 from config.settings import settings
-from app.models import IntentStatus
 
 
 class DailyDigest:

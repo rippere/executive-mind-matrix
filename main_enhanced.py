@@ -73,9 +73,14 @@ async def lifespan(app: FastAPI):
 
     # Start the scheduler for daily digest
     if settings.digest_enabled:
-        scheduler = TaskScheduler()
-        scheduler.start()
-        logger.info("Daily digest scheduler started")
+        try:
+            scheduler = TaskScheduler()
+            scheduler.start()
+            logger.info("Daily digest scheduler started")
+        except Exception as e:
+            logger.error(f"Failed to start digest scheduler: {e}")
+            logger.warning("Application will continue without scheduled digests")
+            scheduler = None
     else:
         logger.info("Daily digest scheduler disabled")
 
@@ -96,8 +101,11 @@ async def lifespan(app: FastAPI):
             pass
 
     if scheduler:
-        scheduler.stop()
-        logger.info("Daily digest scheduler stopped")
+        try:
+            scheduler.stop()
+            logger.info("Daily digest scheduler stopped")
+        except Exception as e:
+            logger.error(f"Error stopping scheduler: {e}")
 
     logger.success("Application shut down successfully")
 

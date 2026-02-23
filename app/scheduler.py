@@ -73,32 +73,47 @@ class TaskScheduler:
 
     def start(self):
         """Start the scheduler with all configured jobs"""
-        logger.info("Starting task scheduler")
+        try:
+            logger.info("Starting task scheduler")
 
-        # Daily digest - 8am every day
-        self.scheduler.add_job(
-            self.generate_and_send_daily_digest,
-            CronTrigger(hour=8, minute=0),
-            id="daily_digest",
-            name="Daily Digest",
-            replace_existing=True
-        )
+            # Daily digest - 8am every day
+            self.scheduler.add_job(
+                self.generate_and_send_daily_digest,
+                CronTrigger(hour=8, minute=0),
+                id="daily_digest",
+                name="Daily Digest",
+                replace_existing=True
+            )
 
-        # Weekly summary - Monday 9am
-        self.scheduler.add_job(
-            self.generate_weekly_summary,
-            CronTrigger(day_of_week="mon", hour=9, minute=0),
-            id="weekly_summary",
-            name="Weekly Summary",
-            replace_existing=True
-        )
+            # Weekly summary - Monday 9am
+            self.scheduler.add_job(
+                self.generate_weekly_summary,
+                CronTrigger(day_of_week="mon", hour=9, minute=0),
+                id="weekly_summary",
+                name="Weekly Summary",
+                replace_existing=True
+            )
 
-        # Start scheduler
-        self.scheduler.start()
+            # Start scheduler
+            self.scheduler.start()
 
-        logger.success("Task scheduler started")
-        logger.info(f"Next daily digest: {self.scheduler.get_job('daily_digest').next_run_time}")
-        logger.info(f"Next weekly summary: {self.scheduler.get_job('weekly_summary').next_run_time}")
+            logger.success("Task scheduler started")
+
+            # Log next run times (with error handling)
+            try:
+                daily_job = self.scheduler.get_job('daily_digest')
+                if daily_job and daily_job.next_run_time:
+                    logger.info(f"Next daily digest: {daily_job.next_run_time}")
+
+                weekly_job = self.scheduler.get_job('weekly_summary')
+                if weekly_job and weekly_job.next_run_time:
+                    logger.info(f"Next weekly summary: {weekly_job.next_run_time}")
+            except Exception as e:
+                logger.warning(f"Could not get job next run times: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to start task scheduler: {e}")
+            raise
 
     def stop(self):
         """Stop the scheduler gracefully"""
