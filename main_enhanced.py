@@ -14,6 +14,7 @@ from app.models import AgentPersona, RiskLevel
 from app.smart_router import SmartRouter
 from app.scheduler import TaskScheduler
 from app.daily_digest import DailyDigest
+from app.performance_dashboard import PerformanceDashboard
 from app.monitoring import (
     SentryConfig,
     StructuredLogger,
@@ -905,6 +906,100 @@ async def explain_smart_router(
 
     except Exception as e:
         logger.error(f"Error explaining smart router: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboard/overview")
+async def get_performance_dashboard(time_range: str = "30d"):
+    """
+    Get complete agent performance dashboard overview.
+
+    Returns dashboard-ready data with:
+    - Overall system metrics
+    - Per-agent performance summaries with trends
+    - Top performers and improvement areas
+    - Fine-tuning readiness status
+    - Visualization data for charts
+
+    Args:
+        time_range: "7d", "30d", "90d", or "all"
+
+    Returns:
+        Comprehensive dashboard data
+    """
+    try:
+        dashboard = PerformanceDashboard()
+        data = await dashboard.get_dashboard_overview(time_range=time_range)
+
+        logger.info(f"Dashboard overview generated for {time_range}")
+
+        return data
+
+    except Exception as e:
+        logger.error(f"Error generating dashboard overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboard/agent/{agent_name}")
+async def get_agent_deep_dive(agent_name: str, time_range: str = "30d"):
+    """
+    Get detailed performance analysis for a specific agent.
+
+    Returns:
+    - Performance metrics
+    - Improvement opportunities
+    - Pattern analysis (deletions, additions, tone shifts)
+    - Actionable recommendations
+
+    Args:
+        agent_name: Agent persona name (e.g., "The Entrepreneur")
+        time_range: "7d", "30d", "90d", or "all"
+
+    Returns:
+        Deep dive analysis
+    """
+    try:
+        dashboard = PerformanceDashboard()
+        data = await dashboard.get_agent_deep_dive(
+            agent_name=agent_name,
+            time_range=time_range
+        )
+
+        logger.info(f"Agent deep dive generated for {agent_name}")
+
+        return data
+
+    except Exception as e:
+        logger.error(f"Error generating agent deep dive: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboard/compare")
+async def compare_all_agents(time_range: str = "30d"):
+    """
+    Generate head-to-head comparisons for all agent pairs.
+
+    Returns:
+    - Pairwise comparison matrix
+    - Leaderboard ranking
+    - Win/loss records
+
+    Args:
+        time_range: "7d", "30d", "90d", or "all"
+
+    Returns:
+        Agent comparison matrix and leaderboard
+    """
+    try:
+        dashboard = PerformanceDashboard()
+        data = await dashboard.compare_agents_dashboard(time_range=time_range)
+
+        logger.info(f"Agent comparison matrix generated for {time_range}")
+
+        return data
+
+    except Exception as e:
+        logger.error(f"Error generating agent comparison: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
