@@ -101,24 +101,41 @@ class DiffLogger:
         """
         Calculate what percentage of AI suggestion was accepted.
         Higher = user made fewer changes = AI was more aligned
+
+        Improved algorithm:
+        - Weights structural changes (additions/removals) more heavily than value edits
+        - Handles nested structures correctly
+        - Penalizes complete rewrites vs small tweaks
         """
 
-        # Simple heuristic: count total keys in original
+        # Count total leaf values in original
         total_keys = self._count_leaf_keys(original)
 
         if total_keys == 0:
             return 0.0
 
-        # Count changed keys
-        changed_keys = (
-            len(diff.get("values_changed", {})) +
-            len(diff.get("dictionary_item_added", set())) +
-            len(diff.get("dictionary_item_removed", set())) +
-            len(diff.get("type_changes", {}))
+        # Calculate weighted changes
+        value_changes = len(diff.get("values_changed", {}))
+        items_added = len(diff.get("dictionary_item_added", set()))
+        items_removed = len(diff.get("dictionary_item_removed", set()))
+        type_changes = len(diff.get("type_changes", {}))
+
+        # Weights: structural changes count more than value edits
+        # - Value changes: 1.0x (editing existing content)
+        # - Additions: 1.5x (user added their own content)
+        # - Removals: 2.0x (user rejected AI suggestion)
+        # - Type changes: 2.5x (fundamental disagreement with structure)
+        weighted_changes = (
+            (value_changes * 1.0) +
+            (items_added * 1.5) +
+            (items_removed * 2.0) +
+            (type_changes * 2.5)
         )
 
-        # Acceptance rate = (total - changed) / total
-        acceptance_rate = max(0.0, (total_keys - changed_keys) / total_keys)
+        # Calculate acceptance rate with weighted changes
+        # Cap at total_keys to prevent negative rates
+        effective_changes = min(weighted_changes, total_keys)
+        acceptance_rate = max(0.0, (total_keys - effective_changes) / total_keys)
 
         return acceptance_rate
 

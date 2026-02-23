@@ -9,8 +9,9 @@ from config.settings import settings
 from app.notion_poller import NotionPoller
 from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
-from app.models import AgentPersona
+from app.models import AgentPersona, RiskLevel
 from app.security import setup_cors, setup_rate_limiting
+from app.smart_router import SmartRouter
 from slowapi.errors import RateLimitExceeded
 
 # Configure logging
@@ -720,3 +721,282 @@ if __name__ == "__main__":
         port=settings.port,
         reload=settings.environment == "development"
     )
+# New endpoints to add to main.py after line ~700
+
+@app.post("/intent/{intent_id}/assign-agent")
+async def auto_assign_agent(
+    intent_id: str,
+    risk_level: Optional[str] = None,
+    projected_impact: Optional[int] = None
+):
+    """
+    Automatically assign the best agent persona to an intent using Smart Router.
+
+    Args:
+        intent_id: Intent to assign agent to
+        risk_level: Optional risk level override (Low/Medium/High)
+        projected_impact: Optional impact score override (1-10)
+
+    Returns:
+        Assigned agent, explanation, and alternative suggestion
+    """
+    try:
+        from notion_client import AsyncClient
+        client = AsyncClient(auth=settings.notion_api_key)
+
+        # Fetch intent details
+        intent_page = await client.pages.retrieve(page_id=intent_id)
+        props = intent_page.get("properties", {})
+
+        # Extract title
+        title_prop = props.get("Name", {}).get("title", [])
+        title = title_prop[0]["text"]["content"] if title_prop else ""
+
+        # Extract description
+        desc_prop = props.get("Description", {}).get("rich_text", [])
+        description = desc_prop[0]["text"]["content"] if desc_prop else ""
+
+        # Extract or use provided risk level
+        if not risk_level:
+            risk_prop = props.get("Risk_Level", {}).get("select", {})
+            risk_level = risk_prop.get("name", "Medium")
+
+        # Extract or use provided impact
+        if not projected_impact:
+            projected_impact = props.get("Projected_Impact", {}).get("number", 5)
+
+        # Convert risk string to enum
+        risk_enum = RiskLevel(risk_level) if risk_level else None
+
+        # Assign agent
+        assigned_agent = SmartRouter.assign_agent(
+            intent_title=title,
+            intent_description=description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        # Get explanation
+        explanation = SmartRouter.explain_assignment(
+            agent=assigned_agent,
+            intent_title=title,
+            intent_description=description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        # Get alternative suggestion
+        alternative = SmartRouter.suggest_alternative_agent(
+            assigned_agent=assigned_agent,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        # Map agent to registry ID
+        agent_map = {
+            AgentPersona.ENTREPRENEUR: "4c4d39c3-1ff2-429f-ba14-b1be67c56eb3",
+            AgentPersona.QUANT: "48c6110f-e4a0-4f70-92f6-f97b1f0e8e76",
+            AgentPersona.AUDITOR: "f30957ac-f132-4bef-a584-8d8f36a417c0"
+        }
+
+        agent_id = agent_map.get(assigned_agent)
+
+        # Update intent with assigned agent
+        if agent_id:
+            await client.pages.update(
+                page_id=intent_id,
+                properties={
+                    "Agent_Persona": {
+                        "relation": [{"id": agent_id}]
+                    }
+                }
+            )
+
+        logger.success(f"Auto-assigned {assigned_agent.value} to intent {intent_id[:8]}")
+
+        return {
+            "status": "success",
+            "intent_id": intent_id,
+            "assigned_agent": assigned_agent.value,
+            "explanation": explanation,
+            "alternative_agent": alternative.value if alternative else None,
+            "agent_id": agent_id
+        }
+
+    except Exception as e:
+        logger.error(f"Error auto-assigning agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/training-data/retrain")
+async def trigger_fine_tuning_retrain(background_tasks: BackgroundTasks):
+    """
+    Trigger fine-tuning model retraining.
+
+    This endpoint:
+    1. Exports training data to JSONL format
+    2. Validates dataset quality
+    3. Returns upload instructions for Anthropic Console
+
+    Note: Actual model fine-tuning happens in Anthropic Console.
+    This endpoint prepares the training data.
+
+    Returns:
+        Dataset stats, validation report, and next steps
+    """
+    try:
+        from app.fine_tuning.data_export import DataExporter
+        from app.training_analytics import TrainingAnalytics
+
+        # Step 1: Get performance summary
+        analytics = TrainingAnalytics()
+        summary = await analytics.get_performance_summary()
+
+        if not summary:
+            raise HTTPException(
+                status_code=400,
+                detail="No training data available. Need at least 10 settlement diffs."
+            )
+
+        # Step 2: Export to JSONL
+        exporter = DataExporter()
+        output_path = await exporter.export_to_anthropic_jsonl(
+            agent_filter=None,  # Export all agents
+            min_acceptance_rate=0.6,  # Only include decent examples
+            output_dir="exports"
+        )
+
+        # Step 3: Validate dataset
+        validation = await exporter.validate_jsonl(output_path)
+
+        if not validation.ready_for_finetuning:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset validation failed: {validation.errors}"
+            )
+
+        # Step 4: Generate upload instructions
+        instructions = f"""
+Fine-tuning dataset ready!
+
+📊 **Dataset Stats**:
+- Total examples: {validation.total_examples}
+- Valid examples: {validation.valid_examples}
+- Average acceptance rate: {validation.avg_acceptance_rate:.1%}
+- File: {output_path}
+
+🚀 **Next Steps**:
+
+1. **Upload to Anthropic Console**:
+   - Go to https://console.anthropic.com/settings/fine-tuning
+   - Click "Create Fine-Tuning Job"
+   - Upload: {output_path}
+   - Base model: claude-3-haiku-20240307 (recommended for cost)
+
+2. **Configure Job**:
+   - Training split: 80/20
+   - Epochs: 3-5 (start with 3)
+   - Learning rate: Auto
+
+3. **Monitor Training**:
+   - Training takes 2-4 hours
+   - Check validation loss curve
+   - Wait for "Completed" status
+
+4. **Deploy Fine-Tuned Model**:
+   - Get model ID from console
+   - Update .env: ANTHROPIC_MODEL=<your-fine-tuned-model-id>
+   - Redeploy to Railway
+
+5. **A/B Test**:
+   - Run both models for 1 week
+   - Compare acceptance rates
+   - Keep the better performer
+
+📈 **Expected Improvement**:
+Based on current avg acceptance rate of {summary[0].avg_acceptance_rate:.1%},
+fine-tuning typically improves by 5-15 percentage points.
+
+💰 **Cost Estimate**:
+- Training: ~$10-30 (one-time)
+- Inference: +20% vs base model
+- Worth it if acceptance rate improves significantly
+"""
+
+        logger.success(f"Fine-tuning dataset prepared: {output_path}")
+
+        return {
+            "status": "success",
+            "dataset_path": output_path,
+            "validation": validation.model_dump(),
+            "summary": [s.model_dump() for s in summary],
+            "instructions": instructions,
+            "ready_for_upload": validation.ready_for_finetuning
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error preparing fine-tuning data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/smart-router/explain")
+async def explain_smart_router(
+    intent_title: str,
+    intent_description: str,
+    risk_level: Optional[str] = "Medium",
+    projected_impact: Optional[int] = 5
+):
+    """
+    Preview Smart Router assignment without modifying anything.
+
+    Useful for understanding why an agent would be assigned before committing.
+
+    Args:
+        intent_title: Intent title
+        intent_description: Intent description
+        risk_level: Risk level (Low/Medium/High)
+        projected_impact: Impact score (1-10)
+
+    Returns:
+        Agent assignment, explanation, and alternative
+    """
+    try:
+        risk_enum = RiskLevel(risk_level) if risk_level else RiskLevel.MEDIUM
+
+        assigned_agent = SmartRouter.assign_agent(
+            intent_title=intent_title,
+            intent_description=intent_description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        explanation = SmartRouter.explain_assignment(
+            agent=assigned_agent,
+            intent_title=intent_title,
+            intent_description=intent_description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        alternative = SmartRouter.suggest_alternative_agent(
+            assigned_agent=assigned_agent,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        return {
+            "assigned_agent": assigned_agent.value,
+            "explanation": explanation,
+            "alternative_agent": alternative.value if alternative else None,
+            "confidence": "high" if any([
+                risk_level == "High",
+                projected_impact >= 8,
+                len([kw for kw in SmartRouter.QUANT_KEYWORDS if kw in intent_description.lower()]) >= 3
+            ]) else "medium"
+        }
+
+    except Exception as e:
+        logger.error(f"Error explaining smart router: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
