@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
@@ -10,6 +10,8 @@ from app.notion_poller import NotionPoller
 from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
 from app.models import AgentPersona
+from app.security import setup_cors, setup_rate_limiting
+from slowapi.errors import RateLimitExceeded
 
 # Configure logging
 logger.remove()
@@ -69,6 +71,23 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Setup security middleware
+setup_cors(app, settings.allowed_origins)
+
+# Setup rate limiting
+if settings.rate_limit_enabled:
+    limiter = setup_rate_limiting(app, settings.rate_limit_per_minute)
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Too Many Requests",
+                "detail": "Rate limit exceeded. Please try again later."
+            }
+        )
 
 
 @app.get("/")

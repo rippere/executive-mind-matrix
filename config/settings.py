@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # Security Configuration
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 60
-    allowed_origins: list[str] = ["*"]
+    allowed_origins: list[str] = ["https://web-production-3d888.up.railway.app"]
     api_key_header: str = "X-API-Key"
     api_key: Optional[str] = None
 
