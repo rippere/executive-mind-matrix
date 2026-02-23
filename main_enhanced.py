@@ -12,6 +12,8 @@ from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
 from app.models import AgentPersona, RiskLevel
 from app.smart_router import SmartRouter
+from app.scheduler import TaskScheduler
+from app.daily_digest import DailyDigest
 from app.monitoring import (
     SentryConfig,
     StructuredLogger,
@@ -44,15 +46,16 @@ if settings.sentry_dsn:
 else:
     logger.warning("Sentry DSN not configured. Error tracking disabled.")
 
-# Global poller instance
+# Global instances
 poller: NotionPoller = None
 poller_task: asyncio.Task = None
+scheduler: TaskScheduler = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    global poller, poller_task
+    global poller, poller_task, scheduler
 
     # Startup
     logger.info("Starting Executive Mind Matrix")
@@ -66,6 +69,14 @@ async def lifespan(app: FastAPI):
     poller = NotionPoller()
     poller_task = asyncio.create_task(poller.start())
     metrics.update_poller_status(True)
+
+    # Start the scheduler for daily digest
+    if settings.digest_enabled:
+        scheduler = TaskScheduler()
+        scheduler.start()
+        logger.info("Daily digest scheduler started")
+    else:
+        logger.info("Daily digest scheduler disabled")
 
     logger.success("Application started successfully")
 
@@ -82,6 +93,10 @@ async def lifespan(app: FastAPI):
             await poller_task
         except asyncio.CancelledError:
             pass
+
+    if scheduler:
+        scheduler.stop()
+        logger.info("Daily digest scheduler stopped")
 
     logger.success("Application shut down successfully")
 
@@ -890,6 +905,122 @@ async def explain_smart_router(
 
     except Exception as e:
         logger.error(f"Error explaining smart router: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/digest/preview")
+async def preview_daily_digest(time_range: str = "24h"):
+    """
+    Generate and preview digest without sending.
+
+    Args:
+        time_range: "24h", "7d", or "30d"
+
+    Returns:
+        Digest data with all sections
+    """
+    try:
+        digest_generator = DailyDigest()
+        digest = await digest_generator.generate_digest(time_range=time_range)
+
+        logger.info(f"Generated {time_range} digest preview")
+
+        return {
+            "status": "success",
+            "digest": digest,
+            "formatted_markdown": digest_generator.format_as_markdown(digest)
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating digest preview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/digest/send")
+async def send_digest_manually(
+    time_range: str = "24h",
+    channel: str = "slack"
+):
+    """
+    Manually trigger digest send to specified channel.
+
+    Args:
+        time_range: "24h", "7d", or "30d"
+        channel: "slack" or "discord"
+
+    Returns:
+        Send status
+    """
+    try:
+        digest_generator = DailyDigest()
+        digest = await digest_generator.generate_digest(time_range=time_range)
+
+        sent = False
+        if channel == "slack" and settings.slack_webhook_url:
+            sent = await digest_generator.send_to_slack(
+                webhook_url=settings.slack_webhook_url,
+                digest=digest
+            )
+        elif channel == "discord" and settings.discord_webhook_url:
+            sent = await digest_generator.send_to_discord(
+                webhook_url=settings.discord_webhook_url,
+                digest=digest
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Channel '{channel}' not configured or invalid. Set webhook URL in environment."
+            )
+
+        if sent:
+            logger.success(f"Digest sent to {channel}")
+            return {
+                "status": "success",
+                "channel": channel,
+                "time_range": time_range,
+                "message": f"Digest sent to {channel} successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send digest to {channel}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending digest: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scheduler/jobs")
+async def list_scheduled_jobs():
+    """
+    List all scheduled jobs and their next run times.
+
+    Returns:
+        List of scheduled jobs with status
+    """
+    try:
+        if not scheduler:
+            return {
+                "status": "disabled",
+                "message": "Scheduler is not running",
+                "jobs": []
+            }
+
+        jobs = scheduler.list_jobs()
+
+        logger.info(f"Retrieved {len(jobs)} scheduled jobs")
+
+        return {
+            "status": "active",
+            "jobs": jobs,
+            "scheduler_enabled": settings.digest_enabled
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing scheduled jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

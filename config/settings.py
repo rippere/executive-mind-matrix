@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     api_key_header: str = "X-API-Key"
     api_key: Optional[str] = None
 
+    # Daily Digest Configuration
+    digest_enabled: bool = True
+    slack_webhook_url: Optional[str] = None
+    discord_webhook_url: Optional[str] = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
