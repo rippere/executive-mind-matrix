@@ -10,7 +10,8 @@ from config.settings import settings
 from app.notion_poller import NotionPoller
 from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
-from app.models import AgentPersona
+from app.models import AgentPersona, RiskLevel
+from app.smart_router import SmartRouter
 from app.monitoring import (
     SentryConfig,
     StructuredLogger,
@@ -757,6 +758,138 @@ async def export_fine_tuning_data(
     except Exception as e:
         logger.error(f"Error exporting fine-tuning data: {e}")
         metrics.record_error("analytics_export_failed", "training_analytics")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/intent/{intent_id}/assign-agent")
+async def auto_assign_agent(
+    intent_id: str,
+    risk_level: Optional[str] = None,
+    projected_impact: Optional[int] = None
+):
+    """
+    Automatically assign the best agent persona to an intent using Smart Router.
+    """
+    try:
+        from notion_client import AsyncClient
+        client = AsyncClient(auth=settings.notion_api_key)
+
+        intent_page = await client.pages.retrieve(page_id=intent_id)
+        props = intent_page.get("properties", {})
+
+        title_prop = props.get("Name", {}).get("title", [])
+        title = title_prop[0]["text"]["content"] if title_prop else ""
+
+        desc_prop = props.get("Description", {}).get("rich_text", [])
+        description = desc_prop[0]["text"]["content"] if desc_prop else ""
+
+        if not risk_level:
+            risk_prop = props.get("Risk_Level", {}).get("select", {})
+            risk_level = risk_prop.get("name", "Medium")
+
+        if not projected_impact:
+            projected_impact = props.get("Projected_Impact", {}).get("number", 5)
+
+        risk_enum = RiskLevel(risk_level) if risk_level else None
+
+        assigned_agent = SmartRouter.assign_agent(
+            intent_title=title,
+            intent_description=description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        explanation = SmartRouter.explain_assignment(
+            agent=assigned_agent,
+            intent_title=title,
+            intent_description=description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        alternative = SmartRouter.suggest_alternative_agent(
+            assigned_agent=assigned_agent,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        agent_map = {
+            AgentPersona.ENTREPRENEUR: "4c4d39c3-1ff2-429f-ba14-b1be67c56eb3",
+            AgentPersona.QUANT: "48c6110f-e4a0-4f70-92f6-f97b1f0e8e76",
+            AgentPersona.AUDITOR: "f30957ac-f132-4bef-a584-8d8f36a417c0"
+        }
+
+        agent_id = agent_map.get(assigned_agent)
+
+        if agent_id:
+            await client.pages.update(
+                page_id=intent_id,
+                properties={"Agent_Persona": {"relation": [{"id": agent_id}]}}
+            )
+
+        logger.success(f"Auto-assigned {assigned_agent.value} to intent {intent_id[:8]}")
+
+        return {
+            "status": "success",
+            "intent_id": intent_id,
+            "assigned_agent": assigned_agent.value,
+            "explanation": explanation,
+            "alternative_agent": alternative.value if alternative else None,
+            "agent_id": agent_id
+        }
+
+    except Exception as e:
+        logger.error(f"Error auto-assigning agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/smart-router/explain")
+async def explain_smart_router(
+    intent_title: str,
+    intent_description: str,
+    risk_level: Optional[str] = "Medium",
+    projected_impact: Optional[int] = 5
+):
+    """
+    Preview Smart Router assignment without modifying anything.
+    """
+    try:
+        risk_enum = RiskLevel(risk_level) if risk_level else RiskLevel.MEDIUM
+
+        assigned_agent = SmartRouter.assign_agent(
+            intent_title=intent_title,
+            intent_description=intent_description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        explanation = SmartRouter.explain_assignment(
+            agent=assigned_agent,
+            intent_title=intent_title,
+            intent_description=intent_description,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        alternative = SmartRouter.suggest_alternative_agent(
+            assigned_agent=assigned_agent,
+            risk_level=risk_enum,
+            projected_impact=projected_impact
+        )
+
+        return {
+            "assigned_agent": assigned_agent.value,
+            "explanation": explanation,
+            "alternative_agent": alternative.value if alternative else None,
+            "confidence": "high" if any([
+                risk_level == "High",
+                projected_impact >= 8,
+                len([kw for kw in SmartRouter.QUANT_KEYWORDS if kw in intent_description.lower()]) >= 3
+            ]) else "medium"
+        }
+
+    except Exception as e:
+        logger.error(f"Error explaining smart router: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
