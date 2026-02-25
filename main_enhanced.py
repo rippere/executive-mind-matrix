@@ -151,9 +151,15 @@ async def root():
     return {
         "status": "running",
         "service": "Executive Mind Matrix",
-        "version": "1.0.0",
+        "version": "1.0.0-fcdb48f",
         "environment": settings.environment,
-        "poller_running": poller.is_running if poller else False
+        "poller_running": poller.is_running if poller else False,
+        "features_deployed": {
+            "dashboard_api": True,
+            "digest_automation": True,
+            "smart_router": True,
+            "scheduler": scheduler is not None
+        }
     }
 
 
