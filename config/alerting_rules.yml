@@ -1,0 +1,184 @@
+# Prometheus Alerting Rules for Executive Mind Matrix
+# Deploy with Prometheus or Alertmanager
+
+groups:
+  - name: executive_mind_matrix_alerts
+    interval: 30s
+    rules:
+      # Critical: Poller Down
+      - alert: PollerDown
+        expr: poller_status == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: poller
+        annotations:
+          summary: "Executive Mind Matrix poller is down"
+          description: "The Notion poller has not run successfully in the last 5 minutes. No intents are being processed."
+          action: "Check Railway logs: railway logs | grep poller"
+
+      # Critical: High Error Rate
+      - alert: HighErrorRate
+        expr: rate(errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (>5%) over the last 5 minutes."
+          action: "Check Sentry dashboard for error details"
+
+      # Warning: Notion API Rate Limit Approaching
+      - alert: NotionAPIRateLimitWarning
+        expr: rate(notion_api_requests_total[1m]) > 2.5
+        for: 5m
+        labels:
+          severity: warning
+          component: notion_api
+        annotations:
+          summary: "Notion API rate approaching limit"
+          description: "Notion API request rate is {{ $value }} req/sec. Limit is 3 req/sec."
+          action: "Consider increasing polling interval or implementing request batching"
+
+      # Warning: Anthropic API Rate Limit
+      - alert: AnthropicAPIRateLimitWarning
+        expr: rate(anthropic_api_requests_total[1m]) > 40
+        for: 2m
+        labels:
+          severity: warning
+          component: anthropic_api
+        annotations:
+          summary: "Anthropic API rate approaching limit"
+          description: "Anthropic API request rate is {{ $value }} req/min. Tier 1 limit is 50 req/min."
+          action: "Consider caching analysis results or upgrading API tier"
+
+      # Warning: High Token Usage
+      - alert: HighTokenUsage
+        expr: rate(anthropic_tokens_used_total[1h]) > 80000
+        for: 10m
+        labels:
+          severity: warning
+          component: anthropic_api
+        annotations:
+          summary: "High Anthropic token usage"
+          description: "Token usage rate is {{ $value }} tokens/hour. Monitor costs."
+          action: "Review agent prompts for efficiency; consider switching to Haiku for non-critical analyses"
+
+      # Warning: Slow API Response
+      - alert: SlowAPIResponse
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API response time degraded"
+          description: "95th percentile response time is {{ $value }}s (>5s threshold)."
+          action: "Check external API latencies (Notion, Anthropic); review slow queries"
+
+      # Warning: Polling Cycle Too Long
+      - alert: PollingCycleSlow
+        expr: histogram_quantile(0.95, rate(poll_cycle_duration_seconds_bucket[10m])) > 180
+        for: 10m
+        labels:
+          severity: warning
+          component: poller
+        annotations:
+          summary: "Polling cycles taking too long"
+          description: "95th percentile poll cycle duration is {{ $value }}s (>3min threshold)."
+          action: "Investigate slow Notion queries or high intent volume"
+
+      # Info: New Intents Pending
+      - alert: PendingIntentsBacklog
+        expr: pending_intents_count > 10
+        for: 30m
+        labels:
+          severity: info
+          component: workflow
+        annotations:
+          summary: "Backlog of pending intents"
+          description: "{{ $value }} intents are pending processing for >30 minutes."
+          action: "Review System Inbox for stuck items; check poller logs"
+
+      # Critical: Memory Usage High
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 500000000
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Process memory usage is {{ $value | humanize1024 }} (>500MB)."
+          action: "Check for memory leaks; consider scaling Railway service"
+
+      # Critical: Database Connection Failures
+      - alert: NotionDatabaseConnectionFailures
+        expr: rate(notion_api_errors_total{error_type="connection"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: notion_api
+        annotations:
+          summary: "Notion database connection failures"
+          description: "Cannot connect to Notion API. {{ $value }} connection errors/sec."
+          action: "Check Notion API status: https://status.notion.so; verify API key is valid"
+
+      # Warning: Low Agent Acceptance Rate
+      - alert: LowAgentAcceptanceRate
+        expr: avg_over_time(agent_acceptance_rate[24h]) < 0.6
+        for: 1h
+        labels:
+          severity: info
+          component: training
+        annotations:
+          summary: "Agent acceptance rate below threshold"
+          description: "24-hour average acceptance rate is {{ $value | humanizePercentage }} (<60%)."
+          action: "Review settlement diffs; consider agent prompt refinement or model fine-tuning"
+
+      # Info: Training Data Ready for Fine-Tuning
+      - alert: TrainingDataReadyForFineTuning
+        expr: training_data_records_total > 100
+        labels:
+          severity: info
+          component: training
+        annotations:
+          summary: "Sufficient training data collected"
+          description: "{{ $value }} settlement diff records collected. Ready for fine-tuning."
+          action: "Run fine-tuning export: POST /training-data/export"
+
+      # Critical: Settlement Diff Logging Failures
+      - alert: SettlementDiffLoggingFailures
+        expr: rate(settlement_diff_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: training
+        annotations:
+          summary: "Settlement diff logging failures"
+          description: "Unable to log settlement diffs. Training data may be incomplete."
+          action: "Check DB_Training_Data write permissions; verify Notion API connectivity"
+
+      # Warning: No Intents Processed Recently
+      - alert: NoIntentsProcessedRecently
+        expr: rate(intents_processed_total[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+          component: workflow
+        annotations:
+          summary: "No intents processed in 2 hours"
+          description: "System may be idle or poller may be stuck."
+          action: "Check if System Inbox is empty; verify poller is running"
+
+      # Info: High-Impact Intent Created
+      - alert: HighImpactIntentCreated
+        expr: increase(intents_created_total{impact="high"}[5m]) > 0
+        labels:
+          severity: info
+          component: workflow
+        annotations:
+          summary: "High-impact intent requires attention"
+          description: "A high-impact (8-10) strategic intent was created."
+          action: "Review Executive Intents dashboard for new high-priority item"
