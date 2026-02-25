@@ -1221,12 +1221,16 @@ async def get_recent_intents(hours: int = 24):
         Summary of recent intents with their current state
     """
     from datetime import datetime, timedelta
+    from notion_client import AsyncClient
 
     try:
+        # Create Notion client for this request
+        notion = AsyncClient(auth=settings.notion_api_key)
+
         cutoff = (datetime.now() - timedelta(hours=hours)).date().isoformat()
 
         # Query System Inbox
-        inbox_response = await poller.notion.databases.query(
+        inbox_response = await notion.databases.query(
             database_id=settings.notion_db_system_inbox,
             filter={
                 "property": "Received_Date",
@@ -1261,7 +1265,7 @@ async def get_recent_intents(hours: int = 24):
             })
 
         # Query Executive Intents
-        intents_response = await poller.notion.databases.query(
+        intents_response = await notion.databases.query(
             database_id=settings.notion_db_executive_intents,
             filter={
                 "property": "Created_Date",
@@ -1293,7 +1297,7 @@ async def get_recent_intents(hours: int = 24):
             actions_count = len(props.get("Related_Actions", {}).get("relation", []))
 
             # Check page content
-            page_blocks = await poller.notion.blocks.children.list(block_id=intent['id'])
+            page_blocks = await notion.blocks.children.list(block_id=intent['id'])
             has_content = len(page_blocks.get("results", [])) > 0
 
             intents.append({
