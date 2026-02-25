@@ -131,12 +131,13 @@ async def create_system_inbox_entry(
             }
         }
 
-        # Add metadata if provided
-        if source_metadata:
-            metadata_text = "\n".join([f"{k}: {v}" for k, v in source_metadata.items()])
-            properties["Source_Metadata"] = {
-                "rich_text": [{"text": {"content": metadata_text[:2000]}}]
-            }
+        # Add metadata if provided (only if Source_Metadata property exists in database)
+        # Note: Currently disabled - add Source_Metadata rich_text property to System Inbox if needed
+        # if source_metadata:
+        #     metadata_text = "\n".join([f"{k}: {v}" for k, v in source_metadata.items()])
+        #     properties["Source_Metadata"] = {
+        #         "rich_text": [{"text": {"content": metadata_text[:2000]}}]
+        #     }
 
         # Create page
         response = await notion_client.pages.create(
