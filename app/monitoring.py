@@ -238,36 +238,13 @@ class StructuredLogger:
         logger.remove()
 
         if json_logs:
-            # JSON structured logging for production
-            def json_formatter(record):
-                log_entry = {
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
-                    "level": record["level"].name,
-                    "message": record["message"],
-                    "module": record["name"],
-                    "function": record["function"],
-                    "line": record["line"],
-                }
-
-                # Add extra context if available
-                if record["extra"]:
-                    log_entry["extra"] = record["extra"]
-
-                # Add exception info if available
-                if record["exception"]:
-                    log_entry["exception"] = {
-                        "type": record["exception"].type.__name__,
-                        "value": str(record["exception"].value),
-                        "traceback": record["exception"].traceback
-                    }
-
-                return json.dumps(log_entry) + "\n"
-
+            # JSON structured logging for production - use Loguru's built-in serialization
             logger.add(
                 sys.stdout,
-                format=json_formatter,
                 level=log_level,
-                serialize=True  # Changed from False - prevents format string interpretation
+                serialize=True,  # Loguru's built-in JSON serialization
+                backtrace=True,
+                diagnose=True
             )
         else:
             # Human-readable logging for development
