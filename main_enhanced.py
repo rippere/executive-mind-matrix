@@ -1649,6 +1649,80 @@ async def validate_database_schemas():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/diagnostic/dump-schemas")
+async def dump_database_schemas():
+    """
+    Dump raw schema information for all databases.
+    Shows actual property names and types as they exist in Notion.
+
+    Returns:
+        Raw property information for debugging schema mismatches
+    """
+    from notion_client import AsyncClient
+
+    try:
+        notion = AsyncClient(auth=settings.notion_api_key)
+
+        databases = {
+            "DB_System_Inbox": settings.notion_db_system_inbox,
+            "DB_Executive_Intents": settings.notion_db_executive_intents,
+            "DB_Action_Pipes": settings.notion_db_action_pipes,
+            "DB_Tasks": settings.notion_db_tasks,
+            "DB_Projects": settings.notion_db_projects,
+            "DB_Areas": settings.notion_db_areas,
+            "DB_Nodes": settings.notion_db_nodes,
+            "DB_Agent_Registry": settings.notion_db_agent_registry,
+            "DB_Execution_Log": settings.notion_db_execution_log,
+            "DB_Training_Data": settings.notion_db_training_data
+        }
+
+        results = []
+
+        for db_name, db_id in databases.items():
+            try:
+                db_info = await notion.databases.retrieve(database_id=db_id)
+                properties = db_info.get("properties", {})
+
+                prop_list = []
+                for prop_name, prop_data in sorted(properties.items()):
+                    prop_type = prop_data.get("type", "unknown")
+
+                    prop_info = {
+                        "name": prop_name,
+                        "type": prop_type
+                    }
+
+                    # Add relation details
+                    if prop_type == "relation":
+                        relation_info = prop_data.get("relation", {})
+                        prop_info["related_database_id"] = relation_info.get("database_id")
+
+                    prop_list.append(prop_info)
+
+                results.append({
+                    "database_name": db_name,
+                    "database_id": db_id,
+                    "total_properties": len(properties),
+                    "properties": prop_list
+                })
+
+            except Exception as e:
+                results.append({
+                    "database_name": db_name,
+                    "database_id": db_id,
+                    "error": str(e)
+                })
+
+        return {
+            "status": "success",
+            "databases": results
+        }
+
+    except Exception as e:
+        logger.error(f"Error dumping schemas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
