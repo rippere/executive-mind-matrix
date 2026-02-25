@@ -59,9 +59,10 @@ async def lifespan(app: FastAPI):
     global poller, poller_task, scheduler
 
     # Startup
-    logger.info("Starting Executive Mind Matrix")
+    logger.info("Starting Executive Mind Matrix v1.0.0-fcdb48f")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Polling interval: {settings.polling_interval_seconds}s")
+    logger.info("Loading new P2 features: Dashboard, Digest, Smart Router, Scheduler")
 
     # Update metrics
     metrics.update_poller_status(False)
