@@ -5,10 +5,7 @@ Run this before adding new properties to any database
 
 from notion_client import AsyncClient
 from typing import List, Dict, Optional
-from datetime import datetime
 from loguru import logger
-import json
-import os
 
 
 class PropertyValidator:
@@ -155,34 +152,17 @@ class PropertyValidator:
     ):
         """Log when a new property is added (audit trail)"""
 
-        # Create log entry with ISO timestamp
         log_entry = {
             "database": database_name,
             "property": property_name,
             "type": property_type,
             "justification": justification,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": "AUTO"
         }
 
         logger.warning(f"NEW PROPERTY CREATED: {log_entry}")
 
-        # Write to structured JSONL log file for audit trail
-        try:
-            log_file = "logs/property_changes.jsonl"
-
-            # Ensure logs directory exists
-            os.makedirs("logs", exist_ok=True)
-
-            # Append to JSONL file (one JSON object per line)
-            with open(log_file, mode='a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry) + "\n")
-
-            logger.debug(f"Property addition logged to {log_file}")
-
-        except Exception as e:
-            logger.error(f"Error writing property change to log file: {e}")
-            # Don't raise - logging failure shouldn't break property creation
-
+        # TODO: Could write to a log file or database for tracking
         return log_entry
 
 

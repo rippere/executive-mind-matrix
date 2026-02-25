@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
@@ -9,10 +9,7 @@ from config.settings import settings
 from app.notion_poller import NotionPoller
 from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
-from app.models import AgentPersona, RiskLevel
-from app.security import setup_cors, setup_rate_limiting
-from app.smart_router import SmartRouter
-from slowapi.errors import RateLimitExceeded
+from app.models import AgentPersona
 
 # Configure logging
 logger.remove()
@@ -72,23 +69,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-
-# Setup security middleware
-setup_cors(app, settings.allowed_origins)
-
-# Setup rate limiting
-if settings.rate_limit_enabled:
-    limiter = setup_rate_limiting(app, settings.rate_limit_per_minute)
-
-    @app.exception_handler(RateLimitExceeded)
-    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": "Too Many Requests",
-                "detail": "Rate limit exceeded. Please try again later."
-            }
-        )
 
 
 @app.get("/")
@@ -253,7 +233,7 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
         task_template = result.growth_perspective.task_generation_template if result.growth_perspective else []
         task_template_text = "\n".join(f"- {task}" for task in task_template) if task_template else "No tasks specified"
 
-        # Preserve FULL AI output for debugging and training (no truncation)
+        # Preserve full AI output for debugging and training
         ai_raw_output = {
             "growth_analysis": result.growth_perspective.dict() if result.growth_perspective else None,
             "risk_analysis": result.risk_perspective.dict() if result.risk_perspective else None,
@@ -261,7 +241,7 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
             "recommended_path": result.recommended_path,
             "conflict_points": result.conflict_points
         }
-        ai_raw_text = json.dumps(ai_raw_output, indent=2)
+        ai_raw_text = json.dumps(ai_raw_output, indent=2)[:2000]
 
         action_response = await client.pages.create(
             parent={"database_id": settings.notion_db_action_pipes},
@@ -290,6 +270,9 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
                 "Task_Generation_Template": {
                     "rich_text": [{"text": {"content": task_template_text[:2000]}}]
                 },
+                "AI_Raw_Output": {
+                    "rich_text": [{"text": {"content": ai_raw_text}}]
+                },
                 "Approval_Status": {
                     "select": {"name": "Pending"}
                 },
@@ -299,42 +282,6 @@ Governance-oriented risks: {result.risk_perspective.risk_assessment if result.ri
             }
         )
         action_id = action_response["id"]
-
-        # Store AI_Raw_Output as page body blocks (no character limit)
-        # This prevents truncation that was corrupting training data
-        try:
-            await client.blocks.children.append(
-                block_id=action_id,
-                children=[
-                    {
-                        "object": "block",
-                        "type": "callout",
-                        "callout": {
-                            "rich_text": [{
-                                "type": "text",
-                                "text": {"content": "🔒 AI Raw Output (Do Not Edit)"}
-                            }],
-                            "icon": {"emoji": "🔒"},
-                            "color": "gray_background"
-                        }
-                    },
-                    {
-                        "object": "block",
-                        "type": "code",
-                        "code": {
-                            "rich_text": [{
-                                "type": "text",
-                                "text": {"content": ai_raw_text}
-                            }],
-                            "language": "json"
-                        }
-                    }
-                ]
-            )
-            logger.info(f"Saved raw AI output as page blocks ({len(ai_raw_text)} chars)")
-        except Exception as e:
-            logger.warning(f"Failed to save AI raw output blocks: {e}")
-            # Don't fail the whole request if this fails
 
         return {
             "status": "success",
@@ -600,119 +547,6 @@ async def spawn_tasks_from_action(action_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------------------------------------------------------
-# Fine-Tuning Analytics Endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/analytics/agents/summary")
-async def get_agents_summary(time_range: str = "30d"):
-    """
-    Performance summary for all agents.
-
-    time_range options: 7d | 30d | 90d | all
-    """
-    if time_range not in ("7d", "30d", "90d", "all"):
-        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
-
-    try:
-        from app.training_analytics import TrainingAnalytics
-        analytics = TrainingAnalytics()
-        summary = await analytics.get_agent_performance_summary(time_range=time_range)
-        return {"status": "success", **summary}
-    except Exception as e:
-        logger.error(f"Error fetching agent summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/analytics/agent/{agent_name}/improvements")
-async def get_improvement_opportunities(
-    agent_name: str,
-    time_range: str = "30d",
-):
-    """
-    Identify prompt improvement opportunities for a specific agent.
-
-    agent_name: "The Entrepreneur" | "The Quant" | "The Auditor"
-    """
-    if time_range not in ("7d", "30d", "90d", "all"):
-        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
-
-    try:
-        from app.training_analytics import TrainingAnalytics
-        analytics = TrainingAnalytics()
-        result = await analytics.identify_improvement_opportunities(
-            agent_name=agent_name,
-            time_range=time_range,
-        )
-        return {"status": "success", **result}
-    except Exception as e:
-        logger.error(f"Error identifying improvements for {agent_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/analytics/compare")
-async def compare_agents(
-    agent_a: str,
-    agent_b: str,
-    time_range: str = "30d",
-):
-    """
-    Head-to-head comparison of two agents.
-
-    Example: /analytics/compare?agent_a=The Entrepreneur&agent_b=The Auditor
-    """
-    if time_range not in ("7d", "30d", "90d", "all"):
-        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
-
-    try:
-        from app.training_analytics import TrainingAnalytics
-        analytics = TrainingAnalytics()
-        comparison = await analytics.compare_agents(
-            agent_a=agent_a,
-            agent_b=agent_b,
-            time_range=time_range,
-        )
-        return {"status": "success", "comparison": comparison.model_dump()}
-    except Exception as e:
-        logger.error(f"Error comparing agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/analytics/export/fine-tuning")
-async def export_fine_tuning_data(
-    min_acceptance_rate: float = 0.7,
-    agent_name: str = None,
-    time_range: str = "all",
-    output_path: str = "data/finetuning_export.jsonl",
-):
-    """
-    Export training data as JSONL for Claude fine-tuning.
-
-    Only includes records at or above min_acceptance_rate (0–1).
-    Optionally filter to a specific agent and/or time range.
-    Returns path, example count, and validation report.
-    """
-    if not 0.0 <= min_acceptance_rate <= 1.0:
-        raise HTTPException(status_code=400, detail="min_acceptance_rate must be between 0.0 and 1.0")
-
-    if time_range not in ("7d", "30d", "90d", "all"):
-        raise HTTPException(status_code=400, detail="time_range must be 7d, 30d, 90d, or all")
-
-    try:
-        from app.training_analytics import TrainingAnalytics
-        analytics = TrainingAnalytics()
-        result = await analytics.export_for_fine_tuning(
-            output_path=output_path,
-            min_acceptance_rate=min_acceptance_rate,
-            agent_name=agent_name,
-            time_range=time_range,
-        )
-        return {"status": "success", **result}
-    except Exception as e:
-        logger.error(f"Error exporting fine-tuning data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
@@ -721,282 +555,3 @@ if __name__ == "__main__":
         port=settings.port,
         reload=settings.environment == "development"
     )
-# New endpoints to add to main.py after line ~700
-
-@app.post("/intent/{intent_id}/assign-agent")
-async def auto_assign_agent(
-    intent_id: str,
-    risk_level: Optional[str] = None,
-    projected_impact: Optional[int] = None
-):
-    """
-    Automatically assign the best agent persona to an intent using Smart Router.
-
-    Args:
-        intent_id: Intent to assign agent to
-        risk_level: Optional risk level override (Low/Medium/High)
-        projected_impact: Optional impact score override (1-10)
-
-    Returns:
-        Assigned agent, explanation, and alternative suggestion
-    """
-    try:
-        from notion_client import AsyncClient
-        client = AsyncClient(auth=settings.notion_api_key)
-
-        # Fetch intent details
-        intent_page = await client.pages.retrieve(page_id=intent_id)
-        props = intent_page.get("properties", {})
-
-        # Extract title
-        title_prop = props.get("Name", {}).get("title", [])
-        title = title_prop[0]["text"]["content"] if title_prop else ""
-
-        # Extract description
-        desc_prop = props.get("Description", {}).get("rich_text", [])
-        description = desc_prop[0]["text"]["content"] if desc_prop else ""
-
-        # Extract or use provided risk level
-        if not risk_level:
-            risk_prop = props.get("Risk_Level", {}).get("select", {})
-            risk_level = risk_prop.get("name", "Medium")
-
-        # Extract or use provided impact
-        if not projected_impact:
-            projected_impact = props.get("Projected_Impact", {}).get("number", 5)
-
-        # Convert risk string to enum
-        risk_enum = RiskLevel(risk_level) if risk_level else None
-
-        # Assign agent
-        assigned_agent = SmartRouter.assign_agent(
-            intent_title=title,
-            intent_description=description,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        # Get explanation
-        explanation = SmartRouter.explain_assignment(
-            agent=assigned_agent,
-            intent_title=title,
-            intent_description=description,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        # Get alternative suggestion
-        alternative = SmartRouter.suggest_alternative_agent(
-            assigned_agent=assigned_agent,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        # Map agent to registry ID
-        agent_map = {
-            AgentPersona.ENTREPRENEUR: "4c4d39c3-1ff2-429f-ba14-b1be67c56eb3",
-            AgentPersona.QUANT: "48c6110f-e4a0-4f70-92f6-f97b1f0e8e76",
-            AgentPersona.AUDITOR: "f30957ac-f132-4bef-a584-8d8f36a417c0"
-        }
-
-        agent_id = agent_map.get(assigned_agent)
-
-        # Update intent with assigned agent
-        if agent_id:
-            await client.pages.update(
-                page_id=intent_id,
-                properties={
-                    "Agent_Persona": {
-                        "relation": [{"id": agent_id}]
-                    }
-                }
-            )
-
-        logger.success(f"Auto-assigned {assigned_agent.value} to intent {intent_id[:8]}")
-
-        return {
-            "status": "success",
-            "intent_id": intent_id,
-            "assigned_agent": assigned_agent.value,
-            "explanation": explanation,
-            "alternative_agent": alternative.value if alternative else None,
-            "agent_id": agent_id
-        }
-
-    except Exception as e:
-        logger.error(f"Error auto-assigning agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/training-data/retrain")
-async def trigger_fine_tuning_retrain(background_tasks: BackgroundTasks):
-    """
-    Trigger fine-tuning model retraining.
-
-    This endpoint:
-    1. Exports training data to JSONL format
-    2. Validates dataset quality
-    3. Returns upload instructions for Anthropic Console
-
-    Note: Actual model fine-tuning happens in Anthropic Console.
-    This endpoint prepares the training data.
-
-    Returns:
-        Dataset stats, validation report, and next steps
-    """
-    try:
-        from app.fine_tuning.data_export import DataExporter
-        from app.training_analytics import TrainingAnalytics
-
-        # Step 1: Get performance summary
-        analytics = TrainingAnalytics()
-        summary = await analytics.get_performance_summary()
-
-        if not summary:
-            raise HTTPException(
-                status_code=400,
-                detail="No training data available. Need at least 10 settlement diffs."
-            )
-
-        # Step 2: Export to JSONL
-        exporter = DataExporter()
-        output_path = await exporter.export_to_anthropic_jsonl(
-            agent_filter=None,  # Export all agents
-            min_acceptance_rate=0.6,  # Only include decent examples
-            output_dir="exports"
-        )
-
-        # Step 3: Validate dataset
-        validation = await exporter.validate_jsonl(output_path)
-
-        if not validation.ready_for_finetuning:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset validation failed: {validation.errors}"
-            )
-
-        # Step 4: Generate upload instructions
-        instructions = f"""
-Fine-tuning dataset ready!
-
-📊 **Dataset Stats**:
-- Total examples: {validation.total_examples}
-- Valid examples: {validation.valid_examples}
-- Average acceptance rate: {validation.avg_acceptance_rate:.1%}
-- File: {output_path}
-
-🚀 **Next Steps**:
-
-1. **Upload to Anthropic Console**:
-   - Go to https://console.anthropic.com/settings/fine-tuning
-   - Click "Create Fine-Tuning Job"
-   - Upload: {output_path}
-   - Base model: claude-3-haiku-20240307 (recommended for cost)
-
-2. **Configure Job**:
-   - Training split: 80/20
-   - Epochs: 3-5 (start with 3)
-   - Learning rate: Auto
-
-3. **Monitor Training**:
-   - Training takes 2-4 hours
-   - Check validation loss curve
-   - Wait for "Completed" status
-
-4. **Deploy Fine-Tuned Model**:
-   - Get model ID from console
-   - Update .env: ANTHROPIC_MODEL=<your-fine-tuned-model-id>
-   - Redeploy to Railway
-
-5. **A/B Test**:
-   - Run both models for 1 week
-   - Compare acceptance rates
-   - Keep the better performer
-
-📈 **Expected Improvement**:
-Based on current avg acceptance rate of {summary[0].avg_acceptance_rate:.1%},
-fine-tuning typically improves by 5-15 percentage points.
-
-💰 **Cost Estimate**:
-- Training: ~$10-30 (one-time)
-- Inference: +20% vs base model
-- Worth it if acceptance rate improves significantly
-"""
-
-        logger.success(f"Fine-tuning dataset prepared: {output_path}")
-
-        return {
-            "status": "success",
-            "dataset_path": output_path,
-            "validation": validation.model_dump(),
-            "summary": [s.model_dump() for s in summary],
-            "instructions": instructions,
-            "ready_for_upload": validation.ready_for_finetuning
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error preparing fine-tuning data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/smart-router/explain")
-async def explain_smart_router(
-    intent_title: str,
-    intent_description: str,
-    risk_level: Optional[str] = "Medium",
-    projected_impact: Optional[int] = 5
-):
-    """
-    Preview Smart Router assignment without modifying anything.
-
-    Useful for understanding why an agent would be assigned before committing.
-
-    Args:
-        intent_title: Intent title
-        intent_description: Intent description
-        risk_level: Risk level (Low/Medium/High)
-        projected_impact: Impact score (1-10)
-
-    Returns:
-        Agent assignment, explanation, and alternative
-    """
-    try:
-        risk_enum = RiskLevel(risk_level) if risk_level else RiskLevel.MEDIUM
-
-        assigned_agent = SmartRouter.assign_agent(
-            intent_title=intent_title,
-            intent_description=intent_description,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        explanation = SmartRouter.explain_assignment(
-            agent=assigned_agent,
-            intent_title=intent_title,
-            intent_description=intent_description,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        alternative = SmartRouter.suggest_alternative_agent(
-            assigned_agent=assigned_agent,
-            risk_level=risk_enum,
-            projected_impact=projected_impact
-        )
-
-        return {
-            "assigned_agent": assigned_agent.value,
-            "explanation": explanation,
-            "alternative_agent": alternative.value if alternative else None,
-            "confidence": "high" if any([
-                risk_level == "High",
-                projected_impact >= 8,
-                len([kw for kw in SmartRouter.QUANT_KEYWORDS if kw in intent_description.lower()]) >= 3
-            ]) else "medium"
-        }
-
-    except Exception as e:
-        logger.error(f"Error explaining smart router: {e}")
-        raise HTTPException(status_code=500, detail=str(e))

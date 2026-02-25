@@ -19,8 +19,7 @@ class DiffLogger:
         self,
         intent_id: str,
         original_plan: Dict[str, Any],
-        final_plan: Dict[str, Any],
-        agent_name: str = None,
+        final_plan: Dict[str, Any]
     ) -> SettlementDiff:
         """
         Compare AI-generated plan vs human-edited final plan.
@@ -50,7 +49,7 @@ class DiffLogger:
         )
 
         # Save to Notion Training Data database
-        await self._save_to_notion(settlement_diff, agent_name=agent_name)
+        await self._save_to_notion(settlement_diff)
 
         # Also save to local JSON log (backup)
         await self._save_to_json_log(settlement_diff)
@@ -101,41 +100,24 @@ class DiffLogger:
         """
         Calculate what percentage of AI suggestion was accepted.
         Higher = user made fewer changes = AI was more aligned
-
-        Improved algorithm:
-        - Weights structural changes (additions/removals) more heavily than value edits
-        - Handles nested structures correctly
-        - Penalizes complete rewrites vs small tweaks
         """
 
-        # Count total leaf values in original
+        # Simple heuristic: count total keys in original
         total_keys = self._count_leaf_keys(original)
 
         if total_keys == 0:
             return 0.0
 
-        # Calculate weighted changes
-        value_changes = len(diff.get("values_changed", {}))
-        items_added = len(diff.get("dictionary_item_added", set()))
-        items_removed = len(diff.get("dictionary_item_removed", set()))
-        type_changes = len(diff.get("type_changes", {}))
-
-        # Weights: structural changes count more than value edits
-        # - Value changes: 1.0x (editing existing content)
-        # - Additions: 1.5x (user added their own content)
-        # - Removals: 2.0x (user rejected AI suggestion)
-        # - Type changes: 2.5x (fundamental disagreement with structure)
-        weighted_changes = (
-            (value_changes * 1.0) +
-            (items_added * 1.5) +
-            (items_removed * 2.0) +
-            (type_changes * 2.5)
+        # Count changed keys
+        changed_keys = (
+            len(diff.get("values_changed", {})) +
+            len(diff.get("dictionary_item_added", set())) +
+            len(diff.get("dictionary_item_removed", set())) +
+            len(diff.get("type_changes", {}))
         )
 
-        # Calculate acceptance rate with weighted changes
-        # Cap at total_keys to prevent negative rates
-        effective_changes = min(weighted_changes, total_keys)
-        acceptance_rate = max(0.0, (total_keys - effective_changes) / total_keys)
+        # Acceptance rate = (total - changed) / total
+        acceptance_rate = max(0.0, (total_keys - changed_keys) / total_keys)
 
         return acceptance_rate
 
@@ -151,66 +133,57 @@ class DiffLogger:
             count += 1
         return count
 
-    async def _save_to_notion(self, diff: SettlementDiff, agent_name: str = None):
+    async def _save_to_notion(self, diff: SettlementDiff):
         """Save settlement diff to Notion Training Data database"""
         try:
-            properties = {
-                "Title": {
-                    "title": [{
-                        "text": {
-                            "content": f"Settlement Diff - {diff.intent_id[:8]} - {diff.timestamp.isoformat()}"
-                        }
-                    }]
-                },
-                "Intent_ID": {
-                    "rich_text": [{
-                        "text": {"content": diff.intent_id}
-                    }]
-                },
-                "Timestamp": {
-                    "date": {
-                        "start": diff.timestamp.isoformat()
-                    }
-                },
-                "Acceptance_Rate": {
-                    "number": round(diff.acceptance_rate * 100, 2)
-                },
-                "Modifications_Count": {
-                    "number": len(diff.user_modifications)
-                },
-                "Modifications": {
-                    "rich_text": [{
-                        "text": {
-                            "content": "\n".join(diff.user_modifications)[:2000]  # Notion limit
-                        }
-                    }]
-                },
-                "Original_Plan": {
-                    "rich_text": [{
-                        "text": {
-                            "content": json.dumps(diff.original_plan, indent=2)[:2000]
-                        }
-                    }]
-                },
-                "Final_Plan": {
-                    "rich_text": [{
-                        "text": {
-                            "content": json.dumps(diff.final_plan, indent=2)[:2000]
-                        }
-                    }]
-                }
-            }
-
-            # Tag with agent name — requires Agent_Name (Select) in DB_Training_Data schema
-            # Fails silently if property not yet added to Notion
-            if agent_name:
-                properties["Agent_Name"] = {
-                    "select": {"name": agent_name}
-                }
-
             await self.client.pages.create(
                 parent={"database_id": settings.notion_db_training_data},
-                properties=properties
+                properties={
+                    "Title": {
+                        "title": [{
+                            "text": {
+                                "content": f"Settlement Diff - {diff.intent_id[:8]} - {diff.timestamp.isoformat()}"
+                            }
+                        }]
+                    },
+                    "Intent_ID": {
+                        "rich_text": [{
+                            "text": {"content": diff.intent_id}
+                        }]
+                    },
+                    "Timestamp": {
+                        "date": {
+                            "start": diff.timestamp.isoformat()
+                        }
+                    },
+                    "Acceptance_Rate": {
+                        "number": round(diff.acceptance_rate * 100, 2)
+                    },
+                    "Modifications_Count": {
+                        "number": len(diff.user_modifications)
+                    },
+                    "Modifications": {
+                        "rich_text": [{
+                            "text": {
+                                "content": "\n".join(diff.user_modifications)[:2000]  # Notion limit
+                            }
+                        }]
+                    },
+                    "Original_Plan": {
+                        "rich_text": [{
+                            "text": {
+                                "content": json.dumps(diff.original_plan, indent=2)[:2000]
+                            }
+                        }]
+                    },
+                    "Final_Plan": {
+                        "rich_text": [{
+                            "text": {
+                                "content": json.dumps(diff.final_plan, indent=2)[:2000]
+                            }
+                        }]
+                    }
+                }
             )
 
             logger.debug(f"Saved settlement diff to Notion: {diff.intent_id[:8]}")

@@ -406,12 +406,9 @@ Respond in JSON:
         dialectic_output: DialecticOutput
     ):
         """
-        🔒 CRITICAL: Save raw AI output as page body blocks in Notion.
+        🔒 CRITICAL: Save raw AI output to a LOCKED property in Notion.
         This prevents data loss when users edit the human-facing fields.
         The diff_logger needs this baseline to calculate accurate acceptance rates.
-
-        Stores as page blocks instead of properties to avoid the 2000 character limit
-        that was corrupting training data.
         """
         try:
             # Find the Action Pipe for this intent
@@ -431,7 +428,7 @@ Respond in JSON:
 
             action_pipe_id = response["results"][0]["id"]
 
-            # Serialize the FULL raw AI output as JSON (no truncation)
+            # Serialize the raw AI output as JSON
             raw_output = {
                 "growth_recommendation": dialectic_output.growth_perspective.recommended_option if dialectic_output.growth_perspective else None,
                 "risk_recommendation": dialectic_output.risk_perspective.recommended_option if dialectic_output.risk_perspective else None,
@@ -441,47 +438,24 @@ Respond in JSON:
                 "timestamp": datetime.now().isoformat()
             }
 
-            raw_output_json = json.dumps(raw_output, indent=2)
-
-            # Clear existing blocks first (in case of re-run)
-            existing_blocks = await self.notion.blocks.children.list(block_id=action_pipe_id)
-            for block in existing_blocks.get("results", []):
-                try:
-                    await self.notion.blocks.delete(block_id=block["id"])
-                except Exception:
-                    pass  # Continue even if deletion fails
-
-            # Store as a code block in the page body (no character limit)
-            await self.notion.blocks.children.append(
-                block_id=action_pipe_id,
-                children=[
-                    {
-                        "object": "block",
-                        "type": "callout",
-                        "callout": {
-                            "rich_text": [{
-                                "type": "text",
-                                "text": {"content": "🔒 AI Raw Output (Do Not Edit)"}
-                            }],
-                            "icon": {"emoji": "🔒"},
-                            "color": "gray_background"
-                        }
-                    },
-                    {
-                        "object": "block",
-                        "type": "code",
-                        "code": {
-                            "rich_text": [{
-                                "type": "text",
-                                "text": {"content": raw_output_json}
-                            }],
-                            "language": "json"
-                        }
+            # Save to a read-only field (user should NOT edit this)
+            await self.notion.pages.update(
+                page_id=action_pipe_id,
+                properties={
+                    # This field stores the ORIGINAL AI output
+                    # Users edit Scenario_Options and Recommended_Option
+                    # But AI_Raw_Output stays locked for diff comparison
+                    "AI_Raw_Output": {
+                        "rich_text": [{
+                            "text": {
+                                "content": json.dumps(raw_output, indent=2)[:2000]
+                            }
+                        }]
                     }
-                ]
+                }
             )
 
-            logger.info(f"Saved raw AI output as page blocks for intent {intent_id[:8]} ({len(raw_output_json)} chars)")
+            logger.info(f"Saved raw AI output for intent {intent_id[:8]}")
 
         except Exception as e:
             logger.error(f"Error saving raw AI output: {e}")

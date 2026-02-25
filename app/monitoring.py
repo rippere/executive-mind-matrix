@@ -261,13 +261,13 @@ class StructuredLogger:
                         "traceback": record["exception"].traceback
                     }
 
-                return json.dumps(log_entry)
+                return json.dumps(log_entry) + "\n"
 
             logger.add(
                 sys.stdout,
                 format=json_formatter,
                 level=log_level,
-                serialize=False
+                serialize=True  # Changed from False - prevents format string interpretation
             )
         else:
             # Human-readable logging for development
@@ -278,14 +278,19 @@ class StructuredLogger:
             )
 
         # File logging with rotation
-        logger.add(
-            log_file,
-            rotation="100 MB",
-            retention="30 days",
-            compression="gz",
-            level="DEBUG",
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
-        )
+        try:
+            logger.add(
+                log_file,
+                rotation="100 MB",
+                retention="30 days",
+                compression="gz",
+                level="DEBUG",
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+            )
+        except Exception as e:
+            # If file logging fails, log to stderr but don't crash
+            logger.add(sys.stderr, level=log_level)
+            logger.warning(f"Could not configure file logging: {e}")
 
         logger.info(f"Logging configured: level={log_level}, json={json_logs}")
 
