@@ -1209,6 +1209,129 @@ async def list_scheduled_jobs():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/diagnostic/recent-intents")
+async def get_recent_intents(hours: int = 24):
+    """
+    Diagnostic endpoint to check recent intents and their processing status.
+
+    Args:
+        hours: Number of hours to look back (default 24)
+
+    Returns:
+        Summary of recent intents with their current state
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        cutoff = (datetime.now() - timedelta(hours=hours)).date().isoformat()
+
+        # Query System Inbox
+        inbox_response = await poller.notion.databases.query(
+            database_id=settings.notion_db_system_inbox,
+            filter={
+                "property": "Received_Date",
+                "date": {"on_or_after": cutoff}
+            },
+            sorts=[{"property": "Received_Date", "direction": "descending"}],
+            page_size=20
+        )
+
+        inbox_items = []
+        for item in inbox_response.get("results", []):
+            props = item.get("properties", {})
+
+            title_prop = props.get("Input_Title", {})
+            title = title_prop.get("title", [{}])[0].get("plain_text", "Untitled") if title_prop.get("title") else "Untitled"
+
+            status_prop = props.get("Status", {}).get("select", {})
+            status = status_prop.get("name", "No Status") if status_prop else "No Status"
+
+            triage_prop = props.get("Triage_Destination", {}).get("select", {})
+            triage = triage_prop.get("name", "Not Triaged") if triage_prop else "Not Triaged"
+
+            routed_prop = props.get("Routed_to_Intent", {})
+            intent_id = routed_prop.get("relation", [{}])[0].get("id") if routed_prop.get("relation") else None
+
+            inbox_items.append({
+                "id": item["id"],
+                "title": title,
+                "status": status,
+                "triage": triage,
+                "routed_to_intent_id": intent_id
+            })
+
+        # Query Executive Intents
+        intents_response = await poller.notion.databases.query(
+            database_id=settings.notion_db_executive_intents,
+            filter={
+                "property": "Created_Date",
+                "date": {"on_or_after": cutoff}
+            },
+            sorts=[{"property": "Created_Date", "direction": "descending"}],
+            page_size=20
+        )
+
+        intents = []
+        for intent in intents_response.get("results", []):
+            props = intent.get("properties", {})
+
+            name_prop = props.get("Name", {})
+            name = name_prop.get("title", [{}])[0].get("plain_text", "Untitled") if name_prop.get("title") else "Untitled"
+
+            status_prop = props.get("Status", {}).get("select", {})
+            status = status_prop.get("name", "No Status") if status_prop else "No Status"
+
+            impact = props.get("Projected_Impact", {}).get("number", 0)
+
+            risk_prop = props.get("Risk_Level", {}).get("select", {})
+            risk = risk_prop.get("name", "Unknown") if risk_prop else "Unknown"
+
+            agent_assigned = bool(props.get("Agent_Persona", {}).get("relation", []))
+            tasks_count = len(props.get("✅ Spawned tasks", {}).get("relation", []))
+            area_assigned = bool(props.get("Area", {}).get("relation", []))
+            nodes_count = len(props.get("Related_Nodes", {}).get("relation", []))
+            actions_count = len(props.get("Related_Actions", {}).get("relation", []))
+
+            # Check page content
+            page_blocks = await poller.notion.blocks.children.list(block_id=intent['id'])
+            has_content = len(page_blocks.get("results", [])) > 0
+
+            intents.append({
+                "id": intent["id"],
+                "name": name,
+                "status": status,
+                "impact": impact,
+                "risk": risk,
+                "agent_assigned": agent_assigned,
+                "area_assigned": area_assigned,
+                "tasks_spawned": tasks_count,
+                "knowledge_nodes": nodes_count,
+                "action_pipes": actions_count,
+                "has_page_content": has_content,
+                "should_auto_dialectic": impact >= 8 or risk == "High",
+                "auto_dialectic_triggered": actions_count > 0
+            })
+
+        return {
+            "status": "success",
+            "cutoff_date": cutoff,
+            "system_inbox_items": inbox_items,
+            "executive_intents": intents,
+            "summary": {
+                "total_inbox_items": len(inbox_items),
+                "total_intents": len(intents),
+                "intents_with_analysis": sum(1 for i in intents if i["has_page_content"]),
+                "intents_missing_analysis": sum(1 for i in intents if not i["has_page_content"]),
+                "auto_dialectic_eligible": sum(1 for i in intents if i["should_auto_dialectic"]),
+                "auto_dialectic_triggered": sum(1 for i in intents if i["auto_dialectic_triggered"])
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error in diagnostic endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
