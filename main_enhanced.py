@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 from loguru import logger
 import sys
+from typing import Optional, Dict, List, Any
 
 from config.settings import settings
 from app.notion_poller import NotionPoller
