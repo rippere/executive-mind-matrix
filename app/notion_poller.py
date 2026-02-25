@@ -123,7 +123,21 @@ class NotionPoller:
                     classification=classification
                 )
 
+                # Update System Inbox with relation to created Executive Intent
+                await self.client.pages.update(
+                    page_id=intent_id,
+                    properties={
+                        "Routed_to_Intent": {
+                            "relation": [{"id": created_intent_id}]
+                        },
+                        "Triage_Destination": {
+                            "select": {"name": "Strategic (Intent)"}
+                        }
+                    }
+                )
+
                 await self.update_status(intent_id, "Triaged_to_Intent")
+                logger.info(f"Strategic intent {intent_id[:8]} triaged to Executive Intent {created_intent_id[:8]}")
 
             elif classification["type"] == "operational":
                 # Create Task directly - operational intents bypass strategic workflow
