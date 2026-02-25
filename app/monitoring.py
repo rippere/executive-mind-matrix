@@ -146,6 +146,25 @@ class PrometheusMetrics:
             'Duration of dialectic flows'
         )
 
+        # Auto-dialectic metrics
+        self.auto_dialectics_triggered = Counter(
+            'auto_dialectics_triggered_total',
+            'Total number of automatically triggered dialectics',
+            ['trigger_reason', 'status']  # trigger_reason: high_impact, high_risk
+        )
+
+        # Command Center metrics
+        self.command_center_refreshes = Counter(
+            'command_center_refreshes_total',
+            'Total number of Command Center metric refreshes',
+            ['status']  # status: success, failure
+        )
+
+        self.command_center_refresh_duration = Histogram(
+            'command_center_refresh_duration_seconds',
+            'Duration of Command Center metric refreshes'
+        )
+
         # System health metrics
         self.poller_status = Gauge(
             'poller_status',
@@ -203,6 +222,20 @@ class PrometheusMetrics:
         """Record a dialectic flow"""
         self.dialectic_flows.labels(status=status).inc()
         self.dialectic_flow_duration.observe(duration)
+
+    def record_auto_dialectic_trigger(self, trigger_reason: str, status: str):
+        """Record an auto-dialectic trigger"""
+        self.auto_dialectics_triggered.labels(
+            trigger_reason=trigger_reason,
+            status=status
+        ).inc()
+
+    def record_command_center_refresh(self, success: bool, execution_time: float):
+        """Record a Command Center metrics refresh"""
+        status = "success" if success else "failure"
+        self.command_center_refreshes.labels(status=status).inc()
+        if execution_time > 0:
+            self.command_center_refresh_duration.observe(execution_time)
 
     def update_poller_status(self, is_running: bool):
         """Update poller status"""

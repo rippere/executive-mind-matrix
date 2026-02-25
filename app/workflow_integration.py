@@ -135,6 +135,21 @@ class WorkflowIntegration:
                 analysis
             )
 
+            # AUTO-DIALECTIC TRIGGER: Run dialectic for high-impact intents
+            if settings.enable_auto_dialectic:
+                should_trigger = (
+                    classification.get("impact", 0) >= 8 or
+                    classification.get("risk", "").lower() == "high"
+                )
+                if should_trigger:
+                    logger.info(f"Auto-triggering dialectic for high-impact intent {intent_id[:8]}")
+                    await self._run_auto_dialectic(
+                        intent_id,
+                        classification,
+                        classification["title"],
+                        content
+                    )
+
             # Add workflow guidance to the Intent page
             await self._add_workflow_guidance(intent_id)
 
@@ -436,6 +451,129 @@ curl -X POST http://localhost:8000/dialectic/{intent_id}"""
         except Exception as e:
             logger.error(f"Error in complete automation workflow: {e}")
             # Don't raise - graceful degradation
+
+    async def _run_auto_dialectic(
+        self,
+        intent_id: str,
+        classification: Dict[str, Any],
+        intent_title: str,
+        content: str
+    ) -> Optional[str]:
+        """
+        Automatically run dialectic flow for high-impact intents.
+
+        This is triggered when:
+        - Impact >= 8 OR
+        - Risk == "High"
+
+        Args:
+            intent_id: The Executive Intent ID
+            classification: The original classification dict
+            intent_title: The intent title
+            content: The intent description/content
+
+        Returns:
+            Action pipe ID if created, None if failed
+        """
+        try:
+            logger.info(f"Starting auto-dialectic for intent {intent_id[:8]} (impact={classification.get('impact')}, risk={classification.get('risk')})")
+
+            # Determine trigger reason for metrics
+            trigger_reason = "high_impact" if classification.get("impact", 0) >= 8 else "high_risk"
+
+            # Import AgentRouter
+            from app.agent_router import AgentRouter
+
+            # Get intent details for dialectic
+            intent_page = await self.client.pages.retrieve(page_id=intent_id)
+            properties = intent_page.get("properties", {})
+
+            # Extract success criteria if available
+            success_criteria_prop = properties.get("Success_Criteria", {}).get("rich_text", [])
+            success_criteria = success_criteria_prop[0]["text"]["content"] if success_criteria_prop else ""
+
+            projected_impact = classification.get("impact", 5)
+
+            # Run dialectic flow
+            router = AgentRouter()
+            dialectic_result = await router.dialectic_flow(
+                intent_id=intent_id,
+                intent_title=intent_title,
+                intent_description=content,
+                success_criteria=success_criteria,
+                projected_impact=projected_impact
+            )
+
+            # Add dialectic results to Intent page using existing method
+            dialectic_dict = {
+                "growth_recommendation": dialectic_result.growth_perspective.recommended_option if dialectic_result.growth_perspective else "N/A",
+                "risk_recommendation": dialectic_result.risk_perspective.recommended_option if dialectic_result.risk_perspective else "N/A",
+                "synthesis": dialectic_result.synthesis,
+                "recommended_path": dialectic_result.recommended_path,
+                "conflict_points": dialectic_result.conflict_points
+            }
+
+            await self.run_dialectic_and_link(intent_id, dialectic_dict)
+
+            # Create Action Pipe with dialectic synthesis
+            action_title = f"🤖 Auto-Generated: {intent_title[:60]}"
+            action_description = f"""AUTO-DIALECTIC SYNTHESIS:
+{dialectic_result.synthesis}
+
+RECOMMENDED PATH:
+{dialectic_result.recommended_path}
+
+GROWTH PERSPECTIVE: Option {dialectic_dict['growth_recommendation']}
+RISK PERSPECTIVE: Option {dialectic_dict['risk_recommendation']}
+
+This action was automatically created because this intent met high-impact criteria (impact >= 8 or risk = High)."""
+
+            action_id = await self.create_action_from_intent(
+                intent_id,
+                action_title,
+                action_description
+            )
+
+            # Log to execution log
+            await self._log_execution(
+                action="Auto-Dialectic Triggered",
+                intent_id=intent_id,
+                details=f"High-impact intent (impact={projected_impact}, risk={classification.get('risk')}) automatically triggered dialectic analysis. Action pipe {action_id[:8]} created."
+            )
+
+            # Record metrics (optional, gracefully handle if metrics not available)
+            try:
+                from app.monitoring import metrics
+                metrics.record_auto_dialectic_trigger(trigger_reason, "success")
+            except Exception:
+                pass  # Metrics are optional, don't fail if unavailable
+
+            logger.success(f"Auto-dialectic complete for intent {intent_id[:8]}, created action {action_id[:8]}")
+
+            return action_id
+
+        except Exception as e:
+            logger.error(f"Error in auto-dialectic flow: {e}")
+
+            # Record failed metric
+            try:
+                from app.monitoring import metrics
+                trigger_reason = "high_impact" if classification.get("impact", 0) >= 8 else "high_risk"
+                metrics.record_auto_dialectic_trigger(trigger_reason, "failed")
+            except Exception:
+                pass  # Metrics are optional
+
+            # Log the error but don't crash the workflow
+            try:
+                await self._log_execution(
+                    action="Auto-Dialectic Failed",
+                    intent_id=intent_id,
+                    details=f"Auto-dialectic failed with error: {str(e)}"
+                )
+            except:
+                pass  # Even logging failed, continue gracefully
+
+            return None
 
     async def _add_workflow_guidance(self, intent_id: str) -> None:
         """Add workflow guidance to Intent page"""

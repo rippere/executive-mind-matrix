@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     slack_webhook_url: Optional[str] = None
     discord_webhook_url: Optional[str] = None
 
+    # Auto-Dialectic Configuration
+    enable_auto_dialectic: bool = True  # Automatically run dialectic for high-impact intents
+
+    # Command Center Auto-Refresh Configuration
+    command_center_refresh_enabled: bool = True
+    command_center_refresh_interval: int = 15  # minutes
+
+    # Webhook Receivers Configuration (P3.1.2)
+    enable_webhooks: bool = True
+    slack_signing_secret: Optional[str] = None
+    webhook_api_key: Optional[str] = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -25,6 +25,7 @@ from app.security import (
     setup_cors,
     setup_rate_limiting,
 )
+from app.webhook_receivers import router as webhook_router
 
 # Configure structured logging
 StructuredLogger.configure(
@@ -88,21 +89,37 @@ async def lifespan(app: FastAPI):
     poller_task = asyncio.create_task(poller.start())
     metrics.update_poller_status(True)
 
-    # Start the scheduler for daily digest
-    if P2_FEATURES_AVAILABLE and settings.digest_enabled and TaskScheduler:
+    # Start the scheduler for daily digest and command center refresh
+    if P2_FEATURES_AVAILABLE and TaskScheduler:
         try:
+            from notion_client import AsyncClient
+
             scheduler = TaskScheduler()
+
+            # Set Notion client for Command Center operations
+            notion_client = AsyncClient(auth=settings.notion_api_key)
+            scheduler.set_notion_client(notion_client)
+
             scheduler.start()
-            logger.info("Daily digest scheduler started")
+
+            # Log what was started
+            if settings.digest_enabled:
+                logger.info("Daily digest scheduler started")
+            if settings.command_center_refresh_enabled:
+                logger.info(
+                    f"Command Center auto-refresh started "
+                    f"(every {settings.command_center_refresh_interval} minutes)"
+                )
+
         except Exception as e:
-            logger.error(f"Failed to start digest scheduler: {e}")
-            logger.warning("Application will continue without scheduled digests")
+            logger.error(f"Failed to start scheduler: {e}")
+            logger.warning("Application will continue without scheduled tasks")
             scheduler = None
     else:
         if not P2_FEATURES_AVAILABLE:
             logger.warning("Scheduler not started: P2 features not available")
         else:
-            logger.info("Daily digest scheduler disabled via settings")
+            logger.info("Scheduler disabled via settings")
 
     logger.success("Application started successfully")
 
@@ -164,6 +181,13 @@ if settings.enable_metrics:
     instrumentator.expose(app, endpoint="/metrics")
     logger.info("Prometheus metrics enabled at /metrics")
 
+# Include webhook receiver router (P3.1.2)
+if settings.enable_webhooks:
+    app.include_router(webhook_router, prefix="/webhooks", tags=["webhooks"])
+    logger.info("Webhook receivers enabled at /webhooks")
+else:
+    logger.warning("Webhook receivers disabled via settings")
+
 
 @app.get("/")
 async def root():
@@ -178,7 +202,8 @@ async def root():
             "dashboard_api": True,
             "digest_automation": True,
             "smart_router": True,
-            "scheduler": scheduler is not None
+            "scheduler": scheduler is not None,
+            "webhook_receivers": settings.enable_webhooks
         }
     }
 

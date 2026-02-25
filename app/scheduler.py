@@ -4,6 +4,7 @@ Task Scheduler - Automated Background Jobs
 Manages scheduled tasks:
 - Daily digest generation (8am daily)
 - Weekly summary (Monday 9am)
+- Command Center metrics refresh (every 15 minutes, configurable)
 - Training data exports (monthly)
 - System health checks (hourly)
 
@@ -26,6 +27,7 @@ class TaskScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler()
         self.digest = DailyDigest()
+        self.notion_client = None  # Will be set via set_notion_client()
 
     async def generate_and_send_daily_digest(self):
         """Generate and send daily digest (called by scheduler)"""
@@ -71,6 +73,67 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"Error in scheduled weekly summary: {e}")
 
+    async def refresh_command_center_metrics(self):
+        """
+        Refresh Command Center metrics in Notion.
+
+        This updates the metrics without recreating the entire command center.
+        Runs automatically based on configured interval.
+        """
+        try:
+            from datetime import datetime
+            start_time = datetime.now()
+
+            logger.info("Starting scheduled Command Center metrics refresh")
+
+            if not self.notion_client:
+                logger.warning("Notion client not set. Skipping Command Center refresh.")
+                return
+
+            from app.command_center_final import FinalCommandCenter
+
+            # Create command center instance
+            command_center = FinalCommandCenter(self.notion_client)
+
+            # Update only the metrics (lightweight operation)
+            metrics = await command_center.update_metrics_only()
+
+            # Calculate execution time
+            execution_time = (datetime.now() - start_time).total_seconds()
+
+            logger.success(
+                f"Command Center metrics refreshed successfully in {execution_time:.2f}s"
+            )
+            logger.info(f"Metrics: {metrics}")
+
+            # Record metrics for monitoring
+            try:
+                from app.monitoring import metrics as prom_metrics
+                prom_metrics.record_command_center_refresh(
+                    success=True,
+                    execution_time=execution_time
+                )
+            except Exception as metric_err:
+                logger.debug(f"Failed to record Prometheus metrics: {metric_err}")
+
+        except Exception as e:
+            logger.error(f"Error in scheduled Command Center refresh: {e}")
+
+            # Record failure metric
+            try:
+                from app.monitoring import metrics as prom_metrics
+                prom_metrics.record_command_center_refresh(
+                    success=False,
+                    execution_time=0
+                )
+            except Exception as metric_err:
+                logger.debug(f"Failed to record Prometheus metrics: {metric_err}")
+
+    def set_notion_client(self, client):
+        """Set the Notion client for Command Center operations"""
+        self.notion_client = client
+        logger.debug("Notion client set for scheduler")
+
     def start(self):
         """Start the scheduler with all configured jobs"""
         try:
@@ -94,6 +157,16 @@ class TaskScheduler:
                 replace_existing=True
             )
 
+            # Command Center metrics refresh - every N minutes (configurable)
+            if settings.command_center_refresh_enabled:
+                self.schedule_command_center_refresh()
+                logger.info(
+                    f"Command Center auto-refresh enabled "
+                    f"(every {settings.command_center_refresh_interval} minutes)"
+                )
+            else:
+                logger.info("Command Center auto-refresh disabled")
+
             # Start scheduler
             self.scheduler.start()
 
@@ -108,12 +181,30 @@ class TaskScheduler:
                 weekly_job = self.scheduler.get_job('weekly_summary')
                 if weekly_job and weekly_job.next_run_time:
                     logger.info(f"Next weekly summary: {weekly_job.next_run_time}")
+
+                cc_job = self.scheduler.get_job('command_center_refresh')
+                if cc_job and cc_job.next_run_time:
+                    logger.info(f"Next Command Center refresh: {cc_job.next_run_time}")
             except Exception as e:
                 logger.warning(f"Could not get job next run times: {e}")
 
         except Exception as e:
             logger.error(f"Failed to start task scheduler: {e}")
             raise
+
+    def schedule_command_center_refresh(self):
+        """Schedule automatic Command Center metrics refresh"""
+        interval = settings.command_center_refresh_interval
+
+        self.scheduler.add_job(
+            self.refresh_command_center_metrics,
+            CronTrigger(minute=f'*/{interval}'),  # Every N minutes
+            id='command_center_refresh',
+            name='Command Center Metrics Refresh',
+            replace_existing=True
+        )
+
+        logger.debug(f"Scheduled Command Center refresh every {interval} minutes")
 
     def stop(self):
         """Stop the scheduler gracefully"""
