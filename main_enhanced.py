@@ -1336,6 +1336,319 @@ async def get_recent_intents(hours: int = 24):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/diagnostic/recent-errors")
+async def get_recent_errors(lines: int = 100):
+    """
+    Diagnostic endpoint to retrieve recent ERROR and WARNING log entries.
+
+    Args:
+        lines: Number of recent log lines to parse (default 100)
+
+    Returns:
+        Structured JSON with recent errors and warnings
+    """
+    import os
+    import re
+    from pathlib import Path
+
+    try:
+        log_file = Path("logs/app.log")
+
+        if not log_file.exists():
+            logger.warning("Log file does not exist")
+            return {
+                "status": "no_logs",
+                "message": "Log file not found. Logs may not be persisted to disk.",
+                "log_file_path": str(log_file.absolute()),
+                "errors": [],
+                "warnings": []
+            }
+
+        # Read last N lines from log file
+        with open(log_file, 'r') as f:
+            all_lines = f.readlines()
+            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+
+        # Parse log entries
+        # Log format: "2026-02-17 10:14:59.407 | DEBUG | app.notion_poller:poll_cycle:43 - Starting poll cycle"
+        log_pattern = re.compile(
+            r'(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| '
+            r'(?P<level>\w+)\s+\| '
+            r'(?P<component>[^\-]+) - '
+            r'(?P<message>.*)'
+        )
+
+        errors = []
+        warnings = []
+
+        for line in recent_lines:
+            match = log_pattern.match(line.strip())
+            if match:
+                level = match.group('level')
+                if level in ('ERROR', 'WARNING'):
+                    entry = {
+                        "timestamp": match.group('timestamp'),
+                        "level": level,
+                        "component": match.group('component').strip(),
+                        "message": match.group('message').strip()
+                    }
+
+                    if level == 'ERROR':
+                        errors.append(entry)
+                    else:
+                        warnings.append(entry)
+
+        logger.info(f"Diagnostic: Found {len(errors)} errors and {len(warnings)} warnings in last {lines} log lines")
+
+        return {
+            "status": "success",
+            "log_file_path": str(log_file.absolute()),
+            "lines_parsed": len(recent_lines),
+            "total_lines_in_file": len(all_lines),
+            "errors_found": len(errors),
+            "warnings_found": len(warnings),
+            "errors": errors,
+            "warnings": warnings
+        }
+
+    except Exception as e:
+        logger.error(f"Error reading log file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read log file: {str(e)}")
+
+
+@app.get("/diagnostic/validate-schemas")
+async def validate_database_schemas():
+    """
+    Diagnostic endpoint to validate Notion database schemas.
+
+    Queries all 10 Notion databases and validates that required properties exist.
+
+    Returns:
+        Structured report showing expected vs actual properties for each database
+    """
+    from notion_client import AsyncClient
+
+    # Define expected schemas based on architecture
+    EXPECTED_SCHEMAS = {
+        "DB_System_Inbox": {
+            "database_id": settings.notion_db_system_inbox,
+            "required_properties": {
+                "Input_Title": "title",
+                "Content": "rich_text",
+                "Status": "select",
+                "Source": "select",
+                "Triage_Destination": "select",
+                "Routed_to_Intent": "relation",
+                "Routed_to_Task": "relation",
+                "Routed_to_Node": "relation",
+                "Received_Date": ["date", "created_time"]  # Can be either
+            }
+        },
+        "DB_Executive_Intents": {
+            "database_id": settings.notion_db_executive_intents,
+            "required_properties": {
+                "Name": "title",
+                "Description": "rich_text",
+                "Status": "select",
+                "Risk_Level": "select",
+                "Projected_Impact": "number",
+                "Priority": "select",
+                "Agent_Persona": "relation",
+                "Area": "relation",
+                "Related_Nodes": "relation",
+                "Related_Actions": "relation",
+                "Source": "relation",
+                "Spawned Project": "relation",
+                "✅ Spawned tasks": "relation",
+                "Created_Date": "date"
+            }
+        },
+        "DB_Action_Pipes": {
+            "database_id": settings.notion_db_action_pipes,
+            "required_properties": {
+                "Action_Title": "title",
+                "Approval_Status": "select",
+                "Intent": "relation",
+                "Agent": "relation",
+                "Diff_Logged": "checkbox"
+            }
+        },
+        "DB_Tasks": {
+            "database_id": settings.notion_db_tasks,
+            "required_properties": {
+                "Name": "title",
+                "Status": ["status", "select"],  # Can be either
+                "Source Intent": "relation",
+                "Projects": "relation",
+                "Area": "relation",
+                "Auto Generated": "checkbox"
+            }
+        },
+        "DB_Projects": {
+            "database_id": settings.notion_db_projects,
+            "required_properties": {
+                "Name": "title",
+                "Status": "select",
+                "Source Intent": "relation",
+                "Tasks": "relation",
+                "Area": "relation"
+            }
+        },
+        "DB_Areas": {
+            "database_id": settings.notion_db_areas,
+            "required_properties": {
+                "Name": "title",
+                "Related Intents": "relation",
+                "Tasks": "relation",
+                "Projects": "relation"
+            }
+        },
+        "DB_Nodes": {
+            "database_id": settings.notion_db_nodes,
+            "required_properties": {
+                "Name": "title",
+                "Content": "rich_text",
+                "Node_Type": "select",
+                "Related_Intents": "relation",
+                "Tasks": "relation",
+                "Projects": "relation",
+                "Areas": "relation"
+            }
+        },
+        "DB_Agent_Registry": {
+            "database_id": settings.notion_db_agent_registry,
+            "required_properties": {
+                "Agent_Name": "title",
+                "System_Prompt": "rich_text",
+                "Active": "checkbox"
+            }
+        },
+        "DB_Execution_Log": {
+            "database_id": settings.notion_db_execution_log,
+            "required_properties": {
+                "Log_Entry_Title": "title",
+                "Action_Taken": "rich_text",
+                "Decision_Date": "date",
+                "Intent": "relation"
+            }
+        },
+        "DB_Training_Data": {
+            "database_id": settings.notion_db_training_data,
+            "required_properties": {
+                "Title": "title",
+                "Agent_Name": "select",
+                "Original_Plan": "rich_text",
+                "Final_Plan": "rich_text",
+                "Acceptance_Rate": "number"
+            }
+        }
+    }
+
+    try:
+        notion = AsyncClient(auth=settings.notion_api_key)
+
+        validation_results = []
+        all_valid = True
+
+        for db_name, schema_info in EXPECTED_SCHEMAS.items():
+            database_id = schema_info["database_id"]
+            expected_props = schema_info["required_properties"]
+
+            try:
+                # Retrieve database schema
+                db_info = await notion.databases.retrieve(database_id=database_id)
+                actual_props = db_info.get("properties", {})
+
+                # Validate each required property
+                missing_props = []
+                extra_props = []
+                valid_props = []
+                type_mismatches = []
+
+                # Check expected properties
+                for prop_name, expected_type in expected_props.items():
+                    if prop_name not in actual_props:
+                        missing_props.append({
+                            "name": prop_name,
+                            "expected_type": expected_type
+                        })
+                        all_valid = False
+                    else:
+                        actual_type = actual_props[prop_name].get("type")
+
+                        # Handle cases where multiple types are acceptable
+                        if isinstance(expected_type, list):
+                            if actual_type in expected_type:
+                                valid_props.append({
+                                    "name": prop_name,
+                                    "type": actual_type
+                                })
+                            else:
+                                type_mismatches.append({
+                                    "name": prop_name,
+                                    "expected_type": expected_type,
+                                    "actual_type": actual_type
+                                })
+                                all_valid = False
+                        else:
+                            if actual_type == expected_type:
+                                valid_props.append({
+                                    "name": prop_name,
+                                    "type": actual_type
+                                })
+                            else:
+                                type_mismatches.append({
+                                    "name": prop_name,
+                                    "expected_type": expected_type,
+                                    "actual_type": actual_type
+                                })
+                                all_valid = False
+
+                # Find extra properties (in Notion but not expected)
+                for prop_name, prop_info in actual_props.items():
+                    if prop_name not in expected_props:
+                        extra_props.append({
+                            "name": prop_name,
+                            "type": prop_info.get("type")
+                        })
+
+                validation_results.append({
+                    "database_name": db_name,
+                    "database_id": database_id,
+                    "validation_status": "valid" if not missing_props and not type_mismatches else "invalid",
+                    "total_properties": len(actual_props),
+                    "required_properties": len(expected_props),
+                    "valid_properties": len(valid_props),
+                    "missing_properties": missing_props,
+                    "type_mismatches": type_mismatches,
+                    "extra_properties": extra_props
+                })
+
+                logger.info(f"Validated {db_name}: {len(valid_props)}/{len(expected_props)} required properties found")
+
+            except Exception as e:
+                logger.error(f"Error validating {db_name}: {e}")
+                validation_results.append({
+                    "database_name": db_name,
+                    "database_id": database_id,
+                    "validation_status": "error",
+                    "error": str(e)
+                })
+                all_valid = False
+
+        return {
+            "status": "success",
+            "overall_validation": "valid" if all_valid else "issues_found",
+            "databases_validated": len(EXPECTED_SCHEMAS),
+            "all_schemas_valid": all_valid,
+            "validation_results": validation_results
+        }
+
+    except Exception as e:
+        logger.error(f"Error in schema validation endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
