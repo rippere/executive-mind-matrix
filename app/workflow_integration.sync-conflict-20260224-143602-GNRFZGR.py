@@ -16,10 +16,6 @@ from app.areas_manager import AreasManager
 from app.knowledge_linker import KnowledgeLinker
 from app.task_spawner import TaskSpawner
 
-# Module-level locks to prevent race conditions in sequential ID generation
-_intent_id_lock = asyncio.Lock()
-_log_id_lock = asyncio.Lock()
-
 
 class WorkflowIntegration:
     """Manages the complete workflow integration across all databases"""
@@ -821,24 +817,23 @@ Focus: Compliance, governance, long-term sustainability"""
             return "P2"
 
     async def _get_next_intent_id(self) -> int:
-        """Get next sequential Intent ID (thread-safe)"""
-        async with _intent_id_lock:
-            try:
-                # Get all intents and find max ID
-                response = await self.client.databases.query(
-                    database_id=settings.notion_db_executive_intents,
-                    page_size=100
-                )
+        """Get next sequential Intent ID"""
+        try:
+            # Get all intents and find max ID
+            response = await self.client.databases.query(
+                database_id=settings.notion_db_executive_intents,
+                page_size=100
+            )
 
-                max_id = 0
-                for page in response.get("results", []):
-                    intent_id = page.get("properties", {}).get("Intent ID", {}).get("number")
-                    if intent_id and intent_id > max_id:
-                        max_id = intent_id
+            max_id = 0
+            for page in response.get("results", []):
+                intent_id = page.get("properties", {}).get("Intent ID", {}).get("number")
+                if intent_id and intent_id > max_id:
+                    max_id = intent_id
 
-                return max_id + 1
-            except:
-                return 1
+            return max_id + 1
+        except:
+            return 1
 
     def _calculate_due_date(self, impact: int) -> str:
         """Calculate due date based on impact/priority"""
@@ -907,8 +902,7 @@ Focus: Compliance, governance, long-term sustainability"""
 
     async def approve_action(self, action_id: str) -> None:
         """
-        Approve an Action Pipe, set the approval timestamp, and capture the
-        settlement diff for fine-tuning training data.
+        Approve an Action Pipe and set the approval timestamp.
 
         Args:
             action_id: The ID of the Action Pipe to approve
@@ -926,9 +920,6 @@ Focus: Compliance, governance, long-term sustainability"""
 
             logger.info(f"Approved action {action_id[:8]} with timestamp")
 
-            # Capture training data diff — non-blocking, never fails approval
-            await self._log_settlement_diff_from_action(action_id)
-
             # Log this approval to Execution Log
             await self._log_execution(
                 action="Action Approved",
@@ -938,132 +929,6 @@ Focus: Compliance, governance, long-term sustainability"""
         except Exception as e:
             logger.error(f"Error approving action: {e}")
             raise
-
-    async def _log_settlement_diff_from_action(self, action_id: str) -> None:
-        """
-        Capture the diff between AI_Raw_Output (original) and the current field
-        values (final) on an Action Pipe, then write to DB_Training_Data.
-
-        Called automatically on approval so training data is collected without
-        any manual steps.
-        """
-        import json as _json
-        from app.diff_logger import DiffLogger
-
-        try:
-            action_page = await self.client.pages.retrieve(page_id=action_id)
-            props = action_page.get("properties", {})
-
-            # Original plan: what the AI generated
-            # Read from page blocks instead of property to avoid truncation
-            ai_raw_text = await self._read_ai_raw_output_from_blocks(action_id)
-
-            # Fallback: try reading from old property-based storage for backwards compatibility
-            if not ai_raw_text.strip():
-                ai_raw_items = props.get("AI_Raw_Output", {}).get("rich_text", [])
-                ai_raw_text = ai_raw_items[0]["text"]["content"] if ai_raw_items else ""
-
-            if not ai_raw_text.strip():
-                logger.debug(f"No AI_Raw_Output on action {action_id[:8]}, skipping diff log")
-                return
-
-            try:
-                original_plan = _json.loads(ai_raw_text)
-            except _json.JSONDecodeError:
-                original_plan = {"raw_output": ai_raw_text}
-
-            # Final plan: what the user left after editing
-            def _rt(key: str) -> str:
-                items = props.get(key, {}).get("rich_text", [])
-                return items[0]["text"]["content"] if items else ""
-
-            final_plan = {
-                "scenario_options": _rt("Scenario_Options"),
-                "risk_assessment": _rt("Risk_Assessment"),
-                "required_resources": _rt("Required_Resources"),
-                "task_generation_template": _rt("Task_Generation_Template"),
-                "recommended_option": (
-                    props.get("Recommended_Option", {}).get("select", {}) or {}
-                ).get("name", ""),
-            }
-
-            # Resolve intent ID from relation
-            intent_relation = props.get("Intent", {}).get("relation", [])
-            intent_id = intent_relation[0]["id"] if intent_relation else action_id
-
-            # Resolve agent name from Agent relation → Agent Registry page
-            agent_name = await self._get_agent_name_for_action(props)
-
-            diff_logger = DiffLogger()
-            await diff_logger.log_settlement_diff(
-                intent_id=intent_id,
-                original_plan=original_plan,
-                final_plan=final_plan,
-                agent_name=agent_name,
-            )
-
-            # Mark as diff-logged on the Action Pipe so the poller won't re-process it
-            # (Diff_Logged checkbox must exist in DB_Action_Pipes schema; fails silently if not)
-            try:
-                await self.client.pages.update(
-                    page_id=action_id,
-                    properties={"Diff_Logged": {"checkbox": True}}
-                )
-            except Exception:
-                pass
-
-            logger.success(f"Settlement diff logged for action {action_id[:8]} (agent: {agent_name or 'unknown'})")
-
-        except Exception as e:
-            logger.warning(f"Settlement diff logging failed for action {action_id[:8]}: {e}")
-            # Never propagate — approval must succeed even if diff logging fails
-
-    async def _get_agent_name_for_action(self, props: Dict[str, Any]) -> Optional[str]:
-        """Resolve the agent name via the Agent relation on an Action Pipe."""
-        agent_relation = props.get("Agent", {}).get("relation", [])
-        if not agent_relation:
-            return None
-        try:
-            agent_page = await self.client.pages.retrieve(page_id=agent_relation[0]["id"])
-            agent_props = agent_page.get("properties", {})
-            name_items = agent_props.get("Agent_Name", {}).get("title", [])
-            return name_items[0]["text"]["content"] if name_items else None
-        except Exception:
-            return None
-
-    async def _read_ai_raw_output_from_blocks(self, page_id: str) -> str:
-        """
-        Read AI_Raw_Output from page body blocks (code block).
-        This avoids the 2000 character truncation that was corrupting training data.
-
-        Returns the full JSON text or empty string if not found.
-        """
-        try:
-            blocks = await self.client.blocks.children.list(block_id=page_id)
-
-            # Look for the code block that contains AI raw output
-            # It should be preceded by a callout with "AI Raw Output"
-            for i, block in enumerate(blocks.get("results", [])):
-                # Check if this is our callout marker
-                if block.get("type") == "callout":
-                    callout_text = ""
-                    for rt in block.get("callout", {}).get("rich_text", []):
-                        callout_text += rt.get("text", {}).get("content", "")
-
-                    if "AI Raw Output" in callout_text:
-                        # The next block should be the code block with the JSON
-                        if i + 1 < len(blocks["results"]):
-                            next_block = blocks["results"][i + 1]
-                            if next_block.get("type") == "code":
-                                code_content = ""
-                                for rt in next_block.get("code", {}).get("rich_text", []):
-                                    code_content += rt.get("text", {}).get("content", "")
-                                return code_content
-
-            return ""
-        except Exception as e:
-            logger.warning(f"Error reading AI raw output from blocks: {e}")
-            return ""
 
     async def _log_execution(
         self,
@@ -1106,20 +971,19 @@ Focus: Compliance, governance, long-term sustainability"""
             logger.warning(f"Could not log execution: {e}")
 
     async def _get_next_log_id(self) -> int:
-        """Get next sequential Log ID (thread-safe)"""
-        async with _log_id_lock:
-            try:
-                response = await self.client.databases.query(
-                    database_id=settings.notion_db_execution_log,
-                    page_size=100
-                )
+        """Get next sequential Log ID"""
+        try:
+            response = await self.client.databases.query(
+                database_id=settings.notion_db_execution_log,
+                page_size=100
+            )
 
-                max_id = 0
-                for page in response.get("results", []):
-                    log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
-                    if log_id and log_id > max_id:
-                        max_id = log_id
+            max_id = 0
+            for page in response.get("results", []):
+                log_id = page.get("properties", {}).get("Log_ID", {}).get("number")
+                if log_id and log_id > max_id:
+                    max_id = log_id
 
-                return max_id + 1
-            except:
-                return 1
+            return max_id + 1
+        except:
+            return 1

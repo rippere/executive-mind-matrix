@@ -11,10 +11,6 @@ from app.notion_poller import NotionPoller
 from app.agent_router import AgentRouter
 from app.diff_logger import DiffLogger
 from app.models import AgentPersona, RiskLevel
-from app.smart_router import SmartRouter
-from app.scheduler import TaskScheduler
-from app.daily_digest import DailyDigest
-from app.performance_dashboard import PerformanceDashboard
 from app.monitoring import (
     SentryConfig,
     StructuredLogger,
@@ -47,6 +43,25 @@ if settings.sentry_dsn:
 else:
     logger.warning("Sentry DSN not configured. Error tracking disabled.")
 
+# Try to import P2 features - gracefully degrade if they fail
+P2_FEATURES_AVAILABLE = False
+try:
+    from app.smart_router import SmartRouter
+    from app.scheduler import TaskScheduler
+    from app.daily_digest import DailyDigest
+    from app.performance_dashboard import PerformanceDashboard
+    P2_FEATURES_AVAILABLE = True
+    logger.info("✓ P2 features loaded successfully (Dashboard, Digest, Smart Router, Scheduler)")
+except Exception as e:
+    logger.error(f"✗ Failed to load P2 features: {e}")
+    logger.warning("Application will start without P2 features")
+    import traceback
+    traceback.print_exc()
+    SmartRouter = None
+    TaskScheduler = None
+    DailyDigest = None
+    PerformanceDashboard = None
+
 # Global instances
 poller: NotionPoller = None
 poller_task: asyncio.Task = None
@@ -73,7 +88,7 @@ async def lifespan(app: FastAPI):
     metrics.update_poller_status(True)
 
     # Start the scheduler for daily digest
-    if settings.digest_enabled:
+    if P2_FEATURES_AVAILABLE and settings.digest_enabled and TaskScheduler:
         try:
             scheduler = TaskScheduler()
             scheduler.start()
@@ -83,7 +98,10 @@ async def lifespan(app: FastAPI):
             logger.warning("Application will continue without scheduled digests")
             scheduler = None
     else:
-        logger.info("Daily digest scheduler disabled")
+        if not P2_FEATURES_AVAILABLE:
+            logger.warning("Scheduler not started: P2 features not available")
+        else:
+            logger.info("Daily digest scheduler disabled via settings")
 
     logger.success("Application started successfully")
 
@@ -942,6 +960,12 @@ async def get_performance_dashboard(time_range: str = "30d"):
     Returns:
         Comprehensive dashboard data
     """
+    if not P2_FEATURES_AVAILABLE or not PerformanceDashboard:
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard feature not available. P2 features failed to load."
+        )
+
     try:
         dashboard = PerformanceDashboard()
         data = await dashboard.get_dashboard_overview(time_range=time_range)
@@ -973,6 +997,11 @@ async def get_agent_deep_dive(agent_name: str, time_range: str = "30d"):
     Returns:
         Deep dive analysis
     """
+    if not P2_FEATURES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="P2 feature not available"
+        )
     try:
         dashboard = PerformanceDashboard()
         data = await dashboard.get_agent_deep_dive(
@@ -1005,6 +1034,11 @@ async def compare_all_agents(time_range: str = "30d"):
     Returns:
         Agent comparison matrix and leaderboard
     """
+    if not P2_FEATURES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="P2 feature not available"
+        )
     try:
         dashboard = PerformanceDashboard()
         data = await dashboard.compare_agents_dashboard(time_range=time_range)
@@ -1029,6 +1063,11 @@ async def preview_daily_digest(time_range: str = "24h"):
     Returns:
         Digest data with all sections
     """
+    if not P2_FEATURES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="P2 feature not available"
+        )
     try:
         digest_generator = DailyDigest()
         digest = await digest_generator.generate_digest(time_range=time_range)
@@ -1061,6 +1100,11 @@ async def send_digest_manually(
     Returns:
         Send status
     """
+    if not P2_FEATURES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="P2 feature not available"
+        )
     try:
         digest_generator = DailyDigest()
         digest = await digest_generator.generate_digest(time_range=time_range)
@@ -1111,6 +1155,11 @@ async def list_scheduled_jobs():
     Returns:
         List of scheduled jobs with status
     """
+    if not P2_FEATURES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="P2 feature not available"
+        )
     try:
         if not scheduler:
             return {
