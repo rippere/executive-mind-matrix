@@ -37,6 +37,10 @@ RUN useradd -m -u 1000 appuser && \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Cache bust: Force rebuild of application layer
+# Version: v1.0.0-fcdb48f (includes P2 features)
+ARG CACHEBUST=1
+
 # Copy application code
 COPY --chown=appuser:appuser . .
 
@@ -60,4 +64,4 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Run the application with production settings
 # Railway provides PORT as an environment variable
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log
+CMD uvicorn main_enhanced:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --log-level info --proxy-headers --forwarded-allow-ips '*' --access-log
