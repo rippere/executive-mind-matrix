@@ -1723,6 +1723,159 @@ async def dump_database_schemas():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/diagnostic/database-mapping")
+async def show_database_mapping():
+    """
+    Show which environment variable points to which actual Notion database.
+    Helps diagnose database ID mapping issues.
+
+    Returns:
+        Mapping of env vars to actual database titles and URLs
+    """
+    from notion_client import AsyncClient
+
+    try:
+        notion = AsyncClient(auth=settings.notion_api_key)
+
+        databases = {
+            "NOTION_DB_SYSTEM_INBOX": settings.notion_db_system_inbox,
+            "NOTION_DB_EXECUTIVE_INTENTS": settings.notion_db_executive_intents,
+            "NOTION_DB_ACTION_PIPES": settings.notion_db_action_pipes,
+            "NOTION_DB_TASKS": settings.notion_db_tasks,
+            "NOTION_DB_PROJECTS": settings.notion_db_projects,
+            "NOTION_DB_AREAS": settings.notion_db_areas,
+            "NOTION_DB_NODES": settings.notion_db_nodes,
+            "NOTION_DB_AGENT_REGISTRY": settings.notion_db_agent_registry,
+            "NOTION_DB_EXECUTION_LOG": settings.notion_db_execution_log,
+            "NOTION_DB_TRAINING_DATA": settings.notion_db_training_data
+        }
+
+        results = []
+        issues_found = []
+
+        for env_var, db_id in databases.items():
+            try:
+                db_info = await notion.databases.retrieve(database_id=db_id)
+
+                # Get database title
+                title_prop = db_info.get("title", [])
+                title = title_prop[0]["plain_text"] if title_prop else "Untitled"
+
+                # Get database URL
+                url = db_info.get("url", f"https://notion.so/{db_id.replace('-', '')}")
+
+                # Get properties
+                properties = db_info.get("properties", {})
+                prop_names = list(properties.keys())
+
+                result = {
+                    "env_var": env_var,
+                    "database_id": db_id,
+                    "title": title,
+                    "url": url,
+                    "property_count": len(properties),
+                    "sample_properties": prop_names[:8]
+                }
+
+                results.append(result)
+
+                # Detect mismatches
+                props_set = set(prop_names)
+
+                if env_var == "NOTION_DB_TASKS":
+                    if "Vision" in props_set or "Related_Intents" in props_set:
+                        issues_found.append({
+                            "env_var": env_var,
+                            "issue": "This doesn't look like a Tasks database",
+                            "evidence": "Has properties like Vision, Related_Intents"
+                        })
+
+                elif env_var == "NOTION_DB_PROJECTS":
+                    if "Auto Generated" in props_set and "Priority" in props_set and "Energy" in props_set:
+                        issues_found.append({
+                            "env_var": env_var,
+                            "issue": "This looks like a TASKS database, not Projects",
+                            "evidence": "Has task-specific properties: Auto Generated, Priority, Energy"
+                        })
+
+                elif env_var == "NOTION_DB_AREAS":
+                    if "Node_Type" in props_set or "Entity_Relationship" in props_set:
+                        issues_found.append({
+                            "env_var": env_var,
+                            "issue": "This looks like a KNOWLEDGE NODES database, not Areas",
+                            "evidence": "Has node-specific properties: Node_Type, Entity_Relationship"
+                        })
+
+                elif env_var == "NOTION_DB_NODES":
+                    if "% Accomplished" in props_set or "Generate plan" in props_set:
+                        issues_found.append({
+                            "env_var": env_var,
+                            "issue": "This looks like a PROJECTS database, not Knowledge Nodes",
+                            "evidence": "Has project-specific properties: % Accomplished, Generate plan"
+                        })
+
+            except Exception as e:
+                results.append({
+                    "env_var": env_var,
+                    "database_id": db_id,
+                    "error": str(e)
+                })
+
+        # Find correct mappings
+        recommendations = {}
+
+        tasks_db = next((r for r in results if "Auto Generated" in r.get("sample_properties", []) and "Priority" in r.get("sample_properties", [])), None)
+        if tasks_db:
+            recommendations["NOTION_DB_TASKS"] = {
+                "correct_id": tasks_db["database_id"],
+                "currently_mapped_as": tasks_db["env_var"],
+                "database_title": tasks_db["title"]
+            }
+
+        projects_db = next((r for r in results if "% Accomplished" in r.get("sample_properties", []) or "Generate plan" in r.get("sample_properties", [])), None)
+        if projects_db:
+            recommendations["NOTION_DB_PROJECTS"] = {
+                "correct_id": projects_db["database_id"],
+                "currently_mapped_as": projects_db["env_var"],
+                "database_title": projects_db["title"]
+            }
+
+        nodes_db = next((r for r in results if "Node_Type" in r.get("sample_properties", []) or "Entity_Relationship" in r.get("sample_properties", [])), None)
+        if nodes_db:
+            recommendations["NOTION_DB_NODES"] = {
+                "correct_id": nodes_db["database_id"],
+                "currently_mapped_as": nodes_db["env_var"],
+                "database_title": nodes_db["title"]
+            }
+
+        # Areas is trickier - look for one that's not tasks/projects/nodes
+        areas_db = next((r for r in results
+                        if r.get("env_var") not in ["NOTION_DB_EXECUTIVE_INTENTS", "NOTION_DB_ACTION_PIPES",
+                                                     "NOTION_DB_AGENT_REGISTRY", "NOTION_DB_EXECUTION_LOG",
+                                                     "NOTION_DB_TRAINING_DATA", "NOTION_DB_SYSTEM_INBOX"]
+                        and r["database_id"] not in [tasks_db["database_id"] if tasks_db else "",
+                                                      projects_db["database_id"] if projects_db else "",
+                                                      nodes_db["database_id"] if nodes_db else ""]), None)
+        if areas_db:
+            recommendations["NOTION_DB_AREAS"] = {
+                "correct_id": areas_db["database_id"],
+                "currently_mapped_as": areas_db["env_var"],
+                "database_title": areas_db["title"]
+            }
+
+        return {
+            "status": "success",
+            "mappings": results,
+            "issues_found": issues_found,
+            "has_mapping_issues": len(issues_found) > 0,
+            "recommended_corrections": recommendations if recommendations else None
+        }
+
+    except Exception as e:
+        logger.error(f"Error showing database mapping: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
