@@ -96,13 +96,18 @@ class NotionPoller:
         intent_id = intent_page["id"]
 
         try:
-            # Update status to Processing
+            # Update status to Processing and stamp Inbox_ID
             await self.update_status(intent_id, "Processing")
+            await self._stamp_inbox_id(intent_id)
             logger.info(f"Processing intent {intent_id[:8]}...")
 
             # Extract intent data
             properties = intent_page.get("properties", {})
             content = self.extract_text_property(properties.get("Content", {}))
+            title = self.extract_text_property(properties.get("Input_Title", {}))
+            # Fall back to title if Content is empty (user typed in title field)
+            if not content.strip() and title.strip():
+                content = title
             source = self.extract_select_property(properties.get("Source", {}))
 
             # Import here to avoid circular dependency
@@ -155,10 +160,13 @@ class NotionPoller:
                                 "title": [{"text": {"content": task_title}}]
                             },
                             "Status": {
-                                "select": {"name": "Not started"}
+                                "status": {"name": "Not started"}
                             },
-                            "Related Intents": {
+                            "DB_System_Inbox": {
                                 "relation": [{"id": intent_id}]
+                            },
+                            "Auto Generated": {
+                                "checkbox": True
                             }
                         }
                     )
@@ -540,6 +548,31 @@ Priority: {classification.get('impact', 5)}/10"""
         except Exception as e:
             logger.warning(f"Could not log task creation: {e}")
             # Don't raise - task creation still succeeded
+
+    async def _stamp_inbox_id(self, page_id: str) -> None:
+        """Write a sequential Inbox_ID to a System Inbox page if not already set"""
+        try:
+            page = await self.client.pages.retrieve(page_id=page_id)
+            existing = page.get("properties", {}).get("Inbox_ID", {}).get("number")
+            if existing:
+                return  # Already stamped
+
+            response = await self.client.databases.query(
+                database_id=settings.notion_db_system_inbox,
+                page_size=100
+            )
+            max_id = 0
+            for p in response.get("results", []):
+                pid = p.get("properties", {}).get("Inbox_ID", {}).get("number")
+                if pid and pid > max_id:
+                    max_id = pid
+
+            await self.client.pages.update(
+                page_id=page_id,
+                properties={"Inbox_ID": {"number": max_id + 1}}
+            )
+        except Exception as e:
+            logger.warning(f"Could not stamp Inbox_ID for {page_id[:8]}: {e}")
 
     async def _get_next_log_id(self) -> int:
         """Get next sequential Log ID from Execution Log (thread-safe)"""

@@ -169,7 +169,7 @@ class TaskSpawner:
 
             # Optional: add description
             if project_details.description:
-                properties["Description"] = {
+                properties["Context"] = {
                     "rich_text": [{"text": {"content": project_details.description}}]
                 }
 
@@ -217,7 +217,7 @@ class TaskSpawner:
                 self.notion.pages.update(
                     page_id=task_id,
                     properties={
-                        "Project": {
+                        "Projects": {
                             "relation": [{"id": project_id}]
                         }
                     }
