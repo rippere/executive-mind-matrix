@@ -6,7 +6,9 @@
 
 ### 1. Read the Property Map
 ```
-Read: /home/rippere/Projects/executive-mind-matrix/DATABASE_PROPERTY_MAP.md
+Read: /mnt/external/executive-mind-matrix/DATABASE_PROPERTY_MAP.md
+# Or hit the live schema endpoint:
+# curl https://web-production-3d888.up.railway.app/diagnostic/dump-schemas
 ```
 
 ### 2. Check for Existing Properties

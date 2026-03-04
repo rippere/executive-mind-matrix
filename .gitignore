@@ -230,3 +230,12 @@ codebase_dump.txt
 notion_schema_audit_report.md
 SCHEMA_AUDIT_SUMMARY.txt
 notion_schema_audit.py
+
+# Syncthing conflict files
+*.sync-conflict-*
+
+# Local diagnostic / scratch scripts
+check_actual_schemas.py
+create_test_intent.py
+diagnose_intent.py
+test_payload.json

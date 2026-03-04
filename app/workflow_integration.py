@@ -243,14 +243,14 @@ AI Rationale:
 
             logger.info(f"Running {agent_name} analysis for intent {intent_id[:8]}")
 
-            # Map agent name to persona and agent ID
+            # Map agent name to persona and agent ID (IDs from env vars)
             agent_map = {
-                "The Entrepreneur": (AgentPersona.ENTREPRENEUR, "4c4d39c3-1ff2-429f-ba14-b1be67c56eb3"),
-                "The Quant": (AgentPersona.QUANT, "48c6110f-e4a0-4f70-92f6-f97b1f0e8e76"),
-                "The Auditor": (AgentPersona.AUDITOR, "f30957ac-f132-4bef-a584-8d8f36a417c0")
+                "The Entrepreneur": (AgentPersona.ENTREPRENEUR, settings.notion_agent_entrepreneur_id),
+                "The Quant": (AgentPersona.QUANT, settings.notion_agent_quant_id),
+                "The Auditor": (AgentPersona.AUDITOR, settings.notion_agent_auditor_id)
             }
 
-            agent_persona, agent_id = agent_map.get(agent_name, (AgentPersona.ENTREPRENEUR, "4c4d39c3-1ff2-429f-ba14-b1be67c56eb3"))
+            agent_persona, agent_id = agent_map.get(agent_name, (AgentPersona.ENTREPRENEUR, settings.notion_agent_entrepreneur_id))
 
             # Link agent to intent
             await self.client.pages.update(

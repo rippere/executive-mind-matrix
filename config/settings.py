@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     slack_signing_secret: Optional[str] = None
     webhook_api_key: Optional[str] = None
 
+    # Notion Page IDs (workspace-specific, set via env)
+    notion_page_command_center: Optional[str] = None
+    notion_agent_entrepreneur_id: Optional[str] = None
+    notion_agent_quant_id: Optional[str] = None
+    notion_agent_auditor_id: Optional[str] = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -22,7 +22,7 @@ class CommandCenterSync:
 
     def __init__(self, notion_client: AsyncClient):
         self.client = notion_client
-        self.command_center_id = "2eac8854-2aed-80cd-8f2a-e96b2e5d52c8"
+        self.command_center_id = settings.notion_page_command_center
 
     async def generate_executive_summary(self, intent_id: str, classification: Dict[str, Any]) -> str:
         """Generate rich executive summary with emojis and structure"""
