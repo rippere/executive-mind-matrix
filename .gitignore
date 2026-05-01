@@ -231,6 +231,10 @@ notion_schema_audit_report.md
 SCHEMA_AUDIT_SUMMARY.txt
 notion_schema_audit.py
 
+# Claude Code session files
+.claude/
+CLAUDE.md
+
 # Syncthing conflict files
 *.sync-conflict-*
 
@@ -239,3 +243,16 @@ check_actual_schemas.py
 create_test_intent.py
 diagnose_intent.py
 test_payload.json
+
+# Internal planning and session artifacts
+SESSION_SUMMARY*.md
+IMPLEMENTATION_*.md
+DEPLOYMENT_*.md
+*_SUMMARY.md
+*_GUIDE.md
+*_CHECKLIST.md
+*_READINESS*.md
+nw_wrld_data/
+assets/fonts/
+assets/models/
+assets/json/
